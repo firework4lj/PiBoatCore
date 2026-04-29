@@ -25,15 +25,21 @@ source .venv/bin/activate
 python -m pi_boat_core
 ```
 
-Configuration is read from environment variables. See `.env.example`.
+Configuration is read from `config.toml`. Start from the example:
+
+```bash
+cp config.example.toml config.toml
+python -m pi_boat_core --config config.toml
+```
 
 ## Central Server
 
 The Node.js receiver lives in the sibling `PiBoatServer` repo. Once that server
-is running, point the Pi service at it:
+is running, set the URL in `config.toml`:
 
-```bash
-SERVER_URL=http://localhost:3000/api/heartbeat python -m pi_boat_core
+```toml
+[server]
+url = "http://localhost:3000/api/heartbeat"
 ```
 
 ## Example Heartbeat
@@ -57,7 +63,7 @@ SERVER_URL=http://localhost:3000/api/heartbeat python -m pi_boat_core
 ## systemd
 
 Copy `systemd/piboatcore.service` to `/etc/systemd/system/piboatcore.service`,
-edit the environment values, then enable it:
+copy your config to `/etc/piboatcore/config.toml`, then enable it:
 
 ```bash
 sudo systemctl daemon-reload
