@@ -7,13 +7,7 @@ Wants=network-online.target
 Type=simple
 User=pi
 WorkingDirectory=/opt/piboatcore
-Environment=BOAT_ID=my-boat
-Environment=DEVICE_ID=raspberry-pi-bridge
-Environment=SERVER_URL=https://example.com/api/heartbeat
-Environment=HEARTBEAT_INTERVAL_SECONDS=30
-Environment=SPOOL_DB_PATH=/var/lib/piboatcore/spool.db
-Environment=MOCK_SENSORS=true
-ExecStart=/opt/piboatcore/.venv/bin/python -m pi_boat_core
+ExecStart=/opt/piboatcore/.venv/bin/python -m pi_boat_core --config /etc/piboatcore/config.toml
 Restart=always
 RestartSec=5
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import argparse
 import logging
 import signal
 from typing import Any
@@ -108,11 +109,12 @@ def build_default_service(config: Config) -> BoatTelemetryService:
 
 
 async def async_main() -> None:
+    args = parse_args()
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
-    service = build_default_service(Config.from_env())
+    service = build_default_service(Config.from_file(args.config))
 
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
@@ -123,3 +125,12 @@ async def async_main() -> None:
 
 def main() -> None:
     asyncio.run(async_main())
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run the PiBoatCore telemetry service.")
+    parser.add_argument(
+        "--config",
+        help="Path to config.toml. Defaults to ./config.toml, then /etc/piboatcore/config.toml.",
+    )
+    return parser.parse_args()

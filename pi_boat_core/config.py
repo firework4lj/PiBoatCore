@@ -1,14 +1,15 @@
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+import tomllib
 
 
-def _bool_from_env(name: str, default: bool) -> bool:
-    value = os.getenv(name)
-    if value is None:
-        return default
-    return value.strip().lower() in {"1", "true", "yes", "on"}
+DEFAULT_CONFIG_PATHS = (
+    Path("./config.toml"),
+    Path("/etc/piboatcore/config.toml"),
+)
 
 
 @dataclass(frozen=True)
@@ -22,13 +23,42 @@ class Config:
     mock_sensors: bool
 
     @classmethod
-    def from_env(cls) -> "Config":
+    def from_file(cls, path: str | Path | None = None) -> "Config":
+        config_path = _resolve_config_path(path)
+        data = _read_toml(config_path)
+
         return cls(
-            boat_id=os.getenv("BOAT_ID", "my-boat"),
-            device_id=os.getenv("DEVICE_ID", "raspberry-pi-bridge"),
-            server_url=os.getenv("SERVER_URL", "http://localhost:3000/api/heartbeat"),
-            heartbeat_interval_seconds=float(os.getenv("HEARTBEAT_INTERVAL_SECONDS", "30")),
-            spool_db_path=os.getenv("SPOOL_DB_PATH", "./spool.db"),
-            request_timeout_seconds=float(os.getenv("REQUEST_TIMEOUT_SECONDS", "8")),
-            mock_sensors=_bool_from_env("MOCK_SENSORS", True),
+            boat_id=_get(data, "boat", "boat_id", default="my-boat"),
+            device_id=_get(data, "boat", "device_id", default="raspberry-pi-bridge"),
+            server_url=_get(data, "server", "url", default="http://localhost:3000/api/heartbeat"),
+            heartbeat_interval_seconds=float(_get(data, "heartbeat", "interval_seconds", default=30)),
+            spool_db_path=_get(data, "storage", "spool_db_path", default="./spool.db"),
+            request_timeout_seconds=float(_get(data, "server", "request_timeout_seconds", default=8)),
+            mock_sensors=bool(_get(data, "sensors", "mock_sensors", default=True)),
         )
+
+
+def _resolve_config_path(path: str | Path | None) -> Path | None:
+    if path is not None:
+        return Path(path)
+
+    for candidate in DEFAULT_CONFIG_PATHS:
+        if candidate.exists():
+            return candidate
+
+    return None
+
+
+def _read_toml(path: Path | None) -> dict[str, Any]:
+    if path is None:
+        return {}
+
+    with path.open("rb") as file:
+        return tomllib.load(file)
+
+
+def _get(data: dict[str, Any], section: str, key: str, *, default: Any) -> Any:
+    value = data.get(section, {}).get(key, default)
+    if value is None:
+        return default
+    return value

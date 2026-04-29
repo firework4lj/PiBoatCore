@@ -1,0 +1,16 @@
+[boat]
+boat_id = "my-boat"
+device_id = "raspberry-pi-bridge"
+
+[server]
+url = "http://localhost:3000/api/heartbeat"
+request_timeout_seconds = 8
+
+[heartbeat]
+interval_seconds = 30
+
+[storage]
+spool_db_path = "./spool.db"
+
+[sensors]
+mock_sensors = true
