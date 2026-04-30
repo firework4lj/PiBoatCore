@@ -8,6 +8,7 @@ on the next heartbeat.
 ## Current Sensors
 
 - System health: uptime, CPU load, memory, disk
+- SIM7600 modem/GNSS health: optional adapter for signal, registration, operator, and GPS
 - GPS: mock adapter for development
 - Bilge: mock adapter for development
 - Battery state of charge: mock adapter for development
@@ -41,6 +42,43 @@ is running, set the URL in `config.toml`:
 [server]
 url = "http://localhost:3000/api/heartbeat"
 ```
+
+## Waveshare SIM7600X
+
+Let Linux own the cellular data connection. PiBoatCore only reads modem health
+and GNSS position over the modem's AT command serial port.
+
+Install the optional serial dependency:
+
+```bash
+python -m pip install ".[modem]"
+```
+
+Enable the adapter in `config.toml`:
+
+```toml
+[sim7600]
+enabled = true
+port = "/dev/ttyUSB2"
+baudrate = 115200
+timeout_seconds = 2
+enable_gnss = true
+max_attempts = 2
+retry_delay_seconds = 1
+```
+
+The exact serial port can vary by Pi image and modem mode. On the Pi, check:
+
+```bash
+ls /dev/ttyUSB*
+```
+
+Use the port that responds to AT commands. For many SIM7600 setups, that is
+`/dev/ttyUSB2`, but confirm on the actual device.
+
+The adapter retries transient serial/AT failures and reports modem errors inside
+the `sim7600` sensor block. The rest of the telemetry service keeps running and
+will continue to queue heartbeats if the network connection is unavailable.
 
 ## Example Heartbeat
 

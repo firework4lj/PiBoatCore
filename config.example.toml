@@ -14,3 +14,12 @@ spool_db_path = "./spool.db"
 
 [sensors]
 mock_sensors = true
+
+[sim7600]
+enabled = false
+port = "/dev/ttyUSB2"
+baudrate = 115200
+timeout_seconds = 2
+enable_gnss = true
+max_attempts = 2
+retry_delay_seconds = 1
