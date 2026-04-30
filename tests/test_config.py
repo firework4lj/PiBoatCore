@@ -27,6 +27,15 @@ class ConfigTests(unittest.TestCase):
 
                 [sensors]
                 mock_sensors = false
+
+                [sim7600]
+                enabled = true
+                port = "/dev/ttyUSB3"
+                baudrate = 9600
+                timeout_seconds = 3
+                enable_gnss = false
+                max_attempts = 4
+                retry_delay_seconds = 1.5
                 """,
                 encoding="utf-8",
             )
@@ -40,6 +49,13 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.heartbeat_interval_seconds, 10)
         self.assertEqual(config.spool_db_path, "/tmp/piboat-spool.db")
         self.assertFalse(config.mock_sensors)
+        self.assertTrue(config.sim7600.enabled)
+        self.assertEqual(config.sim7600.port, "/dev/ttyUSB3")
+        self.assertEqual(config.sim7600.baudrate, 9600)
+        self.assertEqual(config.sim7600.timeout_seconds, 3)
+        self.assertFalse(config.sim7600.enable_gnss)
+        self.assertEqual(config.sim7600.max_attempts, 4)
+        self.assertEqual(config.sim7600.retry_delay_seconds, 1.5)
 
     def test_from_file_uses_defaults_when_no_file_is_available(self) -> None:
         config = Config.from_file(None)
@@ -51,3 +67,6 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.spool_db_path, "./spool.db")
         self.assertEqual(config.request_timeout_seconds, 8)
         self.assertTrue(config.mock_sensors)
+        self.assertFalse(config.sim7600.enabled)
+        self.assertEqual(config.sim7600.port, "/dev/ttyUSB2")
+        self.assertEqual(config.sim7600.max_attempts, 2)

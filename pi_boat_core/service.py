@@ -9,7 +9,14 @@ from typing import Any
 from pi_boat_core.client import TelemetryClient, TelemetryPostError
 from pi_boat_core.config import Config
 from pi_boat_core.models import build_heartbeat
-from pi_boat_core.sensors import MockBatterySocSensor, MockBilgeSensor, MockGpsSensor, SensorAdapter, SystemSensor
+from pi_boat_core.sensors import (
+    MockBatterySocSensor,
+    MockBilgeSensor,
+    MockGpsSensor,
+    SensorAdapter,
+    Sim7600Sensor,
+    SystemSensor,
+)
 from pi_boat_core.spool import TelemetrySpool
 
 LOGGER = logging.getLogger("piboatcore")
@@ -94,6 +101,9 @@ class BoatTelemetryService:
 
 def build_default_service(config: Config) -> BoatTelemetryService:
     sensors: list[SensorAdapter] = [SystemSensor()]
+    if config.sim7600.enabled:
+        sensors.append(Sim7600Sensor(config.sim7600))
+
     if config.mock_sensors:
         sensors.extend([MockGpsSensor(), MockBilgeSensor(), MockBatterySocSensor()])
 

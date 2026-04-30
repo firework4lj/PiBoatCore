@@ -5,6 +5,9 @@ description = "Raspberry Pi boat telemetry service with heartbeat and sensor hea
 requires-python = ">=3.11"
 dependencies = []
 
+[project.optional-dependencies]
+modem = ["pyserial>=3.5"]
+
 [project.scripts]
 piboatcore = "pi_boat_core.service:main"
 
