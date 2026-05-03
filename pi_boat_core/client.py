@@ -36,3 +36,28 @@ class TelemetryClient:
                     raise TelemetryPostError(f"server returned HTTP {response.status}")
         except (TimeoutError, urllib.error.URLError, urllib.error.HTTPError) as exc:
             raise TelemetryPostError(str(exc)) from exc
+
+    def post_snapshot(self, *, boat_id: str, device_id: str, sent_at: str, image: bytes) -> None:
+        snapshot_url = self.server_url.rsplit("/", 1)[0] + "/snapshot"
+        headers = {
+            "Content-Type": "image/jpeg",
+            "X-Boat-Id": boat_id,
+            "X-Device-Id": device_id,
+            "X-Sent-At": sent_at,
+        }
+        if self.api_token:
+            headers["Authorization"] = f"Bearer {self.api_token}"
+
+        request = urllib.request.Request(
+            snapshot_url,
+            data=image,
+            headers=headers,
+            method="POST",
+        )
+
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
+                if response.status < 200 or response.status >= 300:
+                    raise TelemetryPostError(f"server returned HTTP {response.status}")
+        except (TimeoutError, urllib.error.URLError, urllib.error.HTTPError) as exc:
+            raise TelemetryPostError(str(exc)) from exc

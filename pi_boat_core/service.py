@@ -6,9 +6,10 @@ import logging
 import signal
 from typing import Any
 
+from pi_boat_core.camera import capture_snapshot
 from pi_boat_core.client import TelemetryClient, TelemetryPostError
 from pi_boat_core.config import Config
-from pi_boat_core.models import build_compact_heartbeat, build_heartbeat
+from pi_boat_core.models import build_compact_heartbeat, build_heartbeat, utc_now_iso
 from pi_boat_core.sensors import (
     MockBatterySocSensor,
     MockBilgeSensor,
@@ -43,6 +44,17 @@ class BoatTelemetryService:
 
     async def run(self) -> None:
         LOGGER.info("starting telemetry service for boat_id=%s", self.config.boat_id)
+        tasks = [asyncio.create_task(self.run_heartbeats())]
+        if self.config.camera.enabled:
+            tasks.append(asyncio.create_task(self.run_camera()))
+
+        try:
+            await asyncio.gather(*tasks)
+        finally:
+            for task in tasks:
+                task.cancel()
+
+    async def run_heartbeats(self) -> None:
         while not self._stop.is_set():
             await self.tick()
 
@@ -50,6 +62,19 @@ class BoatTelemetryService:
                 await asyncio.wait_for(
                     self._stop.wait(),
                     timeout=self.config.heartbeat_interval_seconds,
+                )
+            except TimeoutError:
+                pass
+
+    async def run_camera(self) -> None:
+        LOGGER.info("starting camera snapshots every %ss", self.config.camera.interval_seconds)
+        while not self._stop.is_set():
+            await self.capture_and_post_snapshot()
+
+            try:
+                await asyncio.wait_for(
+                    self._stop.wait(),
+                    timeout=self.config.camera.interval_seconds,
                 )
             except TimeoutError:
                 pass
@@ -108,6 +133,21 @@ class BoatTelemetryService:
         except TelemetryPostError as exc:
             self.spool.enqueue(payload)
             LOGGER.warning("queued heartbeat sequence=%s error=%s", _payload_sequence(payload), exc)
+
+    async def capture_and_post_snapshot(self) -> None:
+        sent_at = utc_now_iso()
+        try:
+            image = await asyncio.to_thread(capture_snapshot, self.config.camera)
+            await asyncio.to_thread(
+                self.client.post_snapshot,
+                boat_id=self.config.boat_id,
+                device_id=self.config.device_id,
+                sent_at=sent_at,
+                image=image,
+            )
+            LOGGER.info("sent camera snapshot bytes=%s", len(image))
+        except Exception as exc:
+            LOGGER.warning("camera snapshot failed: %s", exc)
 
 
 def build_default_service(config: Config) -> BoatTelemetryService:
