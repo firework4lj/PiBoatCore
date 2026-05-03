@@ -28,6 +28,7 @@ class Config:
     boat_id: str
     device_id: str
     server_url: str
+    payload_format: str
     heartbeat_interval_seconds: float
     spool_db_path: str
     request_timeout_seconds: float
@@ -43,6 +44,7 @@ class Config:
             boat_id=_get(data, "boat", "boat_id", default="my-boat"),
             device_id=_get(data, "boat", "device_id", default="raspberry-pi-bridge"),
             server_url=_get(data, "server", "url", default="http://localhost:3000/api/heartbeat"),
+            payload_format=_get(data, "server", "payload_format", default="compact"),
             heartbeat_interval_seconds=float(_get(data, "heartbeat", "interval_seconds", default=30)),
             spool_db_path=_get(data, "storage", "spool_db_path", default="./spool.db"),
             request_timeout_seconds=float(_get(data, "server", "request_timeout_seconds", default=8)),

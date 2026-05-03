@@ -8,7 +8,7 @@ from typing import Any
 
 from pi_boat_core.client import TelemetryClient, TelemetryPostError
 from pi_boat_core.config import Config
-from pi_boat_core.models import build_heartbeat
+from pi_boat_core.models import build_compact_heartbeat, build_heartbeat
 from pi_boat_core.sensors import (
     MockBatterySocSensor,
     MockBilgeSensor,
@@ -63,9 +63,20 @@ class BoatTelemetryService:
             sequence=self.sequence,
             sensors=sensors,
         )
+        payload = self.format_payload(heartbeat, sensors)
 
         await self.flush_spool()
-        await self.post_or_spool(heartbeat)
+        await self.post_or_spool(payload)
+
+    def format_payload(self, heartbeat: dict[str, Any], sensors: dict[str, dict[str, Any]]) -> dict[str, Any]:
+        if self.config.payload_format == "compact":
+            return build_compact_heartbeat(
+                boat_id=self.config.boat_id,
+                device_id=self.config.device_id,
+                sequence=self.sequence,
+                sensors=sensors,
+            )
+        return heartbeat
 
     async def collect_sensors(self) -> dict[str, dict[str, Any]]:
         readings = await asyncio.gather(
@@ -93,10 +104,10 @@ class BoatTelemetryService:
     async def post_or_spool(self, payload: dict[str, Any]) -> None:
         try:
             await asyncio.to_thread(self.client.post_heartbeat, payload)
-            LOGGER.info("sent heartbeat sequence=%s", payload["sequence"])
+            LOGGER.info("sent heartbeat sequence=%s", _payload_sequence(payload))
         except TelemetryPostError as exc:
             self.spool.enqueue(payload)
-            LOGGER.warning("queued heartbeat sequence=%s error=%s", payload["sequence"], exc)
+            LOGGER.warning("queued heartbeat sequence=%s error=%s", _payload_sequence(payload), exc)
 
 
 def build_default_service(config: Config) -> BoatTelemetryService:
@@ -116,6 +127,17 @@ def build_default_service(config: Config) -> BoatTelemetryService:
         spool=TelemetrySpool(config.spool_db_path),
         sensors=sensors,
     )
+
+
+def _payload_sequence(payload: dict[str, Any]) -> Any:
+    if "sequence" in payload:
+        return payload["sequence"]
+    compact = payload.get("t")
+    if isinstance(compact, str):
+        parts = compact.split(",", 4)
+        if len(parts) >= 4:
+            return parts[3]
+    return "unknown"
 
 
 async def async_main() -> None:

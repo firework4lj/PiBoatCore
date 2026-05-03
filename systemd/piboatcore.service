@@ -1,15 +1,17 @@
 [Unit]
 Description=PiBoatCore boat telemetry service
-After=network-online.target
-Wants=network-online.target
+Wants=network-online.target NetworkManager-wait-online.service
+After=network-online.target NetworkManager-wait-online.service
 
 [Service]
 Type=simple
 User=pi
 WorkingDirectory=/opt/piboatcore
+Environment=PYTHONUNBUFFERED=1
 ExecStart=/opt/piboatcore/.venv/bin/python -m pi_boat_core --config /etc/piboatcore/config.toml
 Restart=always
-RestartSec=5
+RestartSec=10
+StartLimitIntervalSec=0
 
 [Install]
 WantedBy=multi-user.target
