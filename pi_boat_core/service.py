@@ -123,6 +123,7 @@ def build_default_service(config: Config) -> BoatTelemetryService:
         client=TelemetryClient(
             server_url=config.server_url,
             timeout_seconds=config.request_timeout_seconds,
+            api_token=config.server_api_token,
         ),
         spool=TelemetrySpool(config.spool_db_path),
         sensors=sensors,
