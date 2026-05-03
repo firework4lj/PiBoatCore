@@ -18,6 +18,7 @@ class ConfigTests(unittest.TestCase):
                 [server]
                 url = "https://boat.example/api/heartbeat"
                 request_timeout_seconds = 5
+                payload_format = "full"
 
                 [heartbeat]
                 interval_seconds = 10
@@ -45,6 +46,7 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.boat_id, "sea-rose")
         self.assertEqual(config.device_id, "forward-pi")
         self.assertEqual(config.server_url, "https://boat.example/api/heartbeat")
+        self.assertEqual(config.payload_format, "full")
         self.assertEqual(config.request_timeout_seconds, 5)
         self.assertEqual(config.heartbeat_interval_seconds, 10)
         self.assertEqual(config.spool_db_path, "/tmp/piboat-spool.db")
@@ -63,6 +65,7 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.boat_id, "my-boat")
         self.assertEqual(config.device_id, "raspberry-pi-bridge")
         self.assertEqual(config.server_url, "http://localhost:3000/api/heartbeat")
+        self.assertEqual(config.payload_format, "compact")
         self.assertEqual(config.heartbeat_interval_seconds, 30)
         self.assertEqual(config.spool_db_path, "./spool.db")
         self.assertEqual(config.request_timeout_seconds, 8)

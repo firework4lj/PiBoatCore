@@ -5,6 +5,7 @@ device_id = "raspberry-pi-bridge"
 [server]
 url = "http://localhost:3000/api/heartbeat"
 request_timeout_seconds = 8
+payload_format = "compact"
 
 [heartbeat]
 interval_seconds = 30

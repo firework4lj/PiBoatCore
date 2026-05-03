@@ -41,7 +41,13 @@ is running, set the URL in `config.toml`:
 ```toml
 [server]
 url = "http://localhost:3000/api/heartbeat"
+payload_format = "compact"
 ```
+
+`payload_format = "compact"` sends a small versioned CSV payload in `{"t":"..."}`
+and lets PiBoatServer expand it back into normal stored telemetry. Use
+`payload_format = "full"` while debugging if you want to send the verbose JSON
+object.
 
 ## Waveshare SIM7600X
 
@@ -100,10 +106,55 @@ will continue to queue heartbeats if the network connection is unavailable.
 
 ## systemd
 
-Copy `systemd/piboatcore.service` to `/etc/systemd/system/piboatcore.service`,
-copy your config to `/etc/piboatcore/config.toml`, then enable it:
+Use systemd to start PiBoatCore automatically when the Raspberry Pi boots.
+
+Install the app and config:
+
+```bash
+cd ~/PiBoatCore
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install ".[modem]"
+
+sudo mkdir -p /etc/piboatcore
+sudo cp config.toml /etc/piboatcore/config.toml
+sudo mkdir -p /var/lib/piboatcore
+sudo chown "$USER":"$USER" /var/lib/piboatcore
+```
+
+In `/etc/piboatcore/config.toml`, use a spool path outside the repo:
+
+```toml
+[storage]
+spool_db_path = "/var/lib/piboatcore/spool.db"
+```
+
+Install the service:
+
+```bash
+sudo cp systemd/piboatcore.service /etc/systemd/system/piboatcore.service
+```
+
+Edit `/etc/systemd/system/piboatcore.service` so `User`, `WorkingDirectory`,
+and `ExecStart` match the Pi. For example, if the repo lives at
+`/home/lukas/PiBoatCore`:
+
+```ini
+User=lukas
+WorkingDirectory=/home/lukas/PiBoatCore
+ExecStart=/home/lukas/PiBoatCore/.venv/bin/python -m pi_boat_core --config /etc/piboatcore/config.toml
+```
+
+Enable and start it:
 
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl enable --now piboatcore
+```
+
+Check logs:
+
+```bash
+sudo systemctl status piboatcore
+journalctl -u piboatcore -f
 ```
