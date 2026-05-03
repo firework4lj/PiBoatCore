@@ -38,6 +38,15 @@ class ConfigTests(unittest.TestCase):
                 enable_gnss = false
                 max_attempts = 4
                 retry_delay_seconds = 1.5
+
+                [camera]
+                enabled = true
+                device = "/dev/video2"
+                interval_seconds = 600
+                width = 320
+                height = 240
+                jpeg_quality = 45
+                capture_command = "fswebcam"
                 """,
                 encoding="utf-8",
             )
@@ -60,6 +69,12 @@ class ConfigTests(unittest.TestCase):
         self.assertFalse(config.sim7600.enable_gnss)
         self.assertEqual(config.sim7600.max_attempts, 4)
         self.assertEqual(config.sim7600.retry_delay_seconds, 1.5)
+        self.assertTrue(config.camera.enabled)
+        self.assertEqual(config.camera.device, "/dev/video2")
+        self.assertEqual(config.camera.interval_seconds, 600)
+        self.assertEqual(config.camera.width, 320)
+        self.assertEqual(config.camera.height, 240)
+        self.assertEqual(config.camera.jpeg_quality, 45)
 
     def test_from_file_uses_defaults_when_no_file_is_available(self) -> None:
         config = Config.from_file(None)
@@ -76,3 +91,5 @@ class ConfigTests(unittest.TestCase):
         self.assertFalse(config.sim7600.enabled)
         self.assertEqual(config.sim7600.port, "/dev/ttyUSB2")
         self.assertEqual(config.sim7600.max_attempts, 2)
+        self.assertFalse(config.camera.enabled)
+        self.assertEqual(config.camera.device, "/dev/video0")

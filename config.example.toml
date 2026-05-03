@@ -25,3 +25,12 @@ timeout_seconds = 2
 enable_gnss = true
 max_attempts = 2
 retry_delay_seconds = 1
+
+[camera]
+enabled = false
+device = "/dev/video0"
+interval_seconds = 300
+width = 640
+height = 360
+jpeg_quality = 55
+capture_command = "fswebcam"

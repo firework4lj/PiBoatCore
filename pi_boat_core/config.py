@@ -24,6 +24,17 @@ class Sim7600Config:
 
 
 @dataclass(frozen=True)
+class CameraConfig:
+    enabled: bool
+    device: str
+    interval_seconds: float
+    width: int
+    height: int
+    jpeg_quality: int
+    capture_command: str
+
+
+@dataclass(frozen=True)
 class Config:
     boat_id: str
     device_id: str
@@ -35,6 +46,7 @@ class Config:
     request_timeout_seconds: float
     mock_sensors: bool
     sim7600: Sim7600Config
+    camera: CameraConfig
 
     @classmethod
     def from_file(cls, path: str | Path | None = None) -> "Config":
@@ -59,6 +71,15 @@ class Config:
                 enable_gnss=bool(_get(data, "sim7600", "enable_gnss", default=True)),
                 max_attempts=int(_get(data, "sim7600", "max_attempts", default=2)),
                 retry_delay_seconds=float(_get(data, "sim7600", "retry_delay_seconds", default=1)),
+            ),
+            camera=CameraConfig(
+                enabled=bool(_get(data, "camera", "enabled", default=False)),
+                device=_get(data, "camera", "device", default="/dev/video0"),
+                interval_seconds=float(_get(data, "camera", "interval_seconds", default=300)),
+                width=int(_get(data, "camera", "width", default=640)),
+                height=int(_get(data, "camera", "height", default=360)),
+                jpeg_quality=int(_get(data, "camera", "jpeg_quality", default=55)),
+                capture_command=_get(data, "camera", "capture_command", default="fswebcam"),
             ),
         )
 
