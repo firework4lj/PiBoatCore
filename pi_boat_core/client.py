@@ -15,13 +15,18 @@ class TelemetryPostError(RuntimeError):
 class TelemetryClient:
     server_url: str
     timeout_seconds: float
+    api_token: str = ""
 
     def post_heartbeat(self, payload: dict[str, Any]) -> None:
         body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+        headers = {"Content-Type": "application/json"}
+        if self.api_token:
+            headers["Authorization"] = f"Bearer {self.api_token}"
+
         request = urllib.request.Request(
             self.server_url,
             data=body,
-            headers={"Content-Type": "application/json"},
+            headers=headers,
             method="POST",
         )
 
