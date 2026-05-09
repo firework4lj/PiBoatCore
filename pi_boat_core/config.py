@@ -35,6 +35,16 @@ class CameraConfig:
 
 
 @dataclass(frozen=True)
+class ArduinoVoltageConfig:
+    enabled: bool
+    port: str
+    baudrate: int
+    timeout_seconds: float
+    max_attempts: int
+    retry_delay_seconds: float
+
+
+@dataclass(frozen=True)
 class Config:
     boat_id: str
     device_id: str
@@ -47,6 +57,7 @@ class Config:
     mock_sensors: bool
     sim7600: Sim7600Config
     camera: CameraConfig
+    arduino_voltage: ArduinoVoltageConfig
 
     @classmethod
     def from_file(cls, path: str | Path | None = None) -> "Config":
@@ -80,6 +91,14 @@ class Config:
                 height=int(_get(data, "camera", "height", default=360)),
                 jpeg_quality=int(_get(data, "camera", "jpeg_quality", default=55)),
                 capture_command=_get(data, "camera", "capture_command", default="fswebcam"),
+            ),
+            arduino_voltage=ArduinoVoltageConfig(
+                enabled=bool(_get(data, "arduino_voltage", "enabled", default=False)),
+                port=_get(data, "arduino_voltage", "port", default="/dev/ttyACM0"),
+                baudrate=int(_get(data, "arduino_voltage", "baudrate", default=115200)),
+                timeout_seconds=float(_get(data, "arduino_voltage", "timeout_seconds", default=2)),
+                max_attempts=int(_get(data, "arduino_voltage", "max_attempts", default=2)),
+                retry_delay_seconds=float(_get(data, "arduino_voltage", "retry_delay_seconds", default=1)),
             ),
         )
 

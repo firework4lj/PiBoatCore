@@ -47,6 +47,14 @@ class ConfigTests(unittest.TestCase):
                 height = 240
                 jpeg_quality = 45
                 capture_command = "fswebcam"
+
+                [arduino_voltage]
+                enabled = true
+                port = "/dev/ttyACM1"
+                baudrate = 9600
+                timeout_seconds = 4
+                max_attempts = 3
+                retry_delay_seconds = 0.5
                 """,
                 encoding="utf-8",
             )
@@ -75,6 +83,10 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.camera.width, 320)
         self.assertEqual(config.camera.height, 240)
         self.assertEqual(config.camera.jpeg_quality, 45)
+        self.assertTrue(config.arduino_voltage.enabled)
+        self.assertEqual(config.arduino_voltage.port, "/dev/ttyACM1")
+        self.assertEqual(config.arduino_voltage.baudrate, 9600)
+        self.assertEqual(config.arduino_voltage.timeout_seconds, 4)
 
     def test_from_file_uses_defaults_when_no_file_is_available(self) -> None:
         config = Config.from_file(None)
@@ -93,3 +105,5 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.sim7600.max_attempts, 2)
         self.assertFalse(config.camera.enabled)
         self.assertEqual(config.camera.device, "/dev/video0")
+        self.assertFalse(config.arduino_voltage.enabled)
+        self.assertEqual(config.arduino_voltage.port, "/dev/ttyACM0")

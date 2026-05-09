@@ -51,6 +51,12 @@ class HeartbeatModelTests(unittest.TestCase):
                         "altitude_meters": 22.1,
                     },
                 },
+                "arduino_voltage": {
+                    "status": "ok",
+                    "voltage": 12.7,
+                    "charging": False,
+                    "soc_estimate_percent": 100,
+                },
             },
         )
 
@@ -61,6 +67,8 @@ class HeartbeatModelTests(unittest.TestCase):
         self.assertEqual(fields[3], "7")
         self.assertEqual(fields[5], "ok")
         self.assertEqual(fields[10], "-83")
+        self.assertEqual(fields[20], "ok")
+        self.assertEqual(fields[21], "12.7")
 
 
 if __name__ == "__main__":

@@ -48,6 +48,7 @@ def build_compact_heartbeat(
     operator = modem.get("operator", {})
     network = modem.get("network", {})
     gnss = modem.get("gnss", {})
+    voltage = sensors.get("arduino_voltage", {})
 
     fields = [
         "1",
@@ -70,6 +71,10 @@ def build_compact_heartbeat(
         gnss.get("speed_knots"),
         gnss.get("course_degrees"),
         gnss.get("altitude_meters"),
+        voltage.get("status"),
+        voltage.get("voltage"),
+        _bool_to_int(voltage.get("charging")),
+        voltage.get("soc_estimate_percent"),
     ]
 
     return {"t": _to_csv_line(fields)}

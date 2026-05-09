@@ -86,6 +86,36 @@ The adapter retries transient serial/AT failures and reports modem errors inside
 the `sim7600` sensor block. The rest of the telemetry service keeps running and
 will continue to queue heartbeats if the network connection is unavailable.
 
+## Arduino Uno Voltage Sensor
+
+Flash `arduino/voltage_sensor_uno/voltage_sensor_uno.ino` to an Arduino Uno,
+then plug the Uno into the Pi over USB. It prints one JSON voltage reading per
+second over serial.
+
+Install the optional serial dependency:
+
+```bash
+python -m pip install ".[modem]"
+```
+
+Enable it in `config.toml`:
+
+```toml
+[arduino_voltage]
+enabled = true
+port = "/dev/ttyACM0"
+baudrate = 115200
+timeout_seconds = 2
+max_attempts = 2
+retry_delay_seconds = 1
+```
+
+If `/dev/ttyACM0` is not present, check:
+
+```bash
+ls /dev/ttyACM* /dev/ttyUSB*
+```
+
 ## Example Heartbeat
 
 ```json

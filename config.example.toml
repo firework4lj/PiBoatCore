@@ -34,3 +34,11 @@ width = 640
 height = 360
 jpeg_quality = 55
 capture_command = "fswebcam"
+
+[arduino_voltage]
+enabled = false
+port = "/dev/ttyACM0"
+baudrate = 115200
+timeout_seconds = 2
+max_attempts = 2
+retry_delay_seconds = 1

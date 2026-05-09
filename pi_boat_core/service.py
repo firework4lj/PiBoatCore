@@ -11,6 +11,7 @@ from pi_boat_core.client import TelemetryClient, TelemetryPostError
 from pi_boat_core.config import Config
 from pi_boat_core.models import build_compact_heartbeat, build_heartbeat, utc_now_iso
 from pi_boat_core.sensors import (
+    ArduinoVoltageSensor,
     MockBatterySocSensor,
     MockBilgeSensor,
     MockGpsSensor,
@@ -154,6 +155,8 @@ def build_default_service(config: Config) -> BoatTelemetryService:
     sensors: list[SensorAdapter] = [SystemSensor()]
     if config.sim7600.enabled:
         sensors.append(Sim7600Sensor(config.sim7600))
+    if config.arduino_voltage.enabled:
+        sensors.append(ArduinoVoltageSensor(config.arduino_voltage))
 
     if config.mock_sensors:
         sensors.extend([MockGpsSensor(), MockBilgeSensor(), MockBatterySocSensor()])
