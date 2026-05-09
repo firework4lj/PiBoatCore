@@ -107,3 +107,4 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.camera.device, "/dev/video0")
         self.assertFalse(config.arduino_voltage.enabled)
         self.assertEqual(config.arduino_voltage.port, "/dev/ttyACM0")
+        self.assertEqual(config.arduino_voltage.timeout_seconds, 5)

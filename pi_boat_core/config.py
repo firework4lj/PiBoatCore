@@ -96,7 +96,7 @@ class Config:
                 enabled=bool(_get(data, "arduino_voltage", "enabled", default=False)),
                 port=_get(data, "arduino_voltage", "port", default="/dev/ttyACM0"),
                 baudrate=int(_get(data, "arduino_voltage", "baudrate", default=115200)),
-                timeout_seconds=float(_get(data, "arduino_voltage", "timeout_seconds", default=2)),
+                timeout_seconds=float(_get(data, "arduino_voltage", "timeout_seconds", default=5)),
                 max_attempts=int(_get(data, "arduino_voltage", "max_attempts", default=2)),
                 retry_delay_seconds=float(_get(data, "arduino_voltage", "retry_delay_seconds", default=1)),
             ),

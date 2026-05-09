@@ -105,7 +105,7 @@ Enable it in `config.toml`:
 enabled = true
 port = "/dev/ttyACM0"
 baudrate = 115200
-timeout_seconds = 2
+timeout_seconds = 5
 max_attempts = 2
 retry_delay_seconds = 1
 ```

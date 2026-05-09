@@ -56,7 +56,9 @@ class ArduinoVoltageSensor(SensorAdapter):
             timeout=self.config.timeout_seconds,
             write_timeout=self.config.timeout_seconds,
         ) as arduino:
-            deadline = time.monotonic() + self.config.timeout_seconds
+            arduino.reset_input_buffer()
+            deadline = time.monotonic() + max(self.config.timeout_seconds, 4)
+            last_parse_error: Exception | None = None
             while time.monotonic() < deadline:
                 raw = arduino.readline()
                 if not raw:
@@ -66,15 +68,20 @@ class ArduinoVoltageSensor(SensorAdapter):
                 if not line:
                     continue
 
-                reading = parse_voltage_line(line)
-                return {
-                    "status": "ok",
-                    "port": self.config.port,
-                    "consecutive_failures": 0,
-                    "last_success_age_seconds": 0,
-                    **reading,
-                }
+                try:
+                    reading = parse_voltage_line(line)
+                    return {
+                        "status": "ok",
+                        "port": self.config.port,
+                        "consecutive_failures": 0,
+                        "last_success_age_seconds": 0,
+                        **reading,
+                    }
+                except ArduinoVoltageError as exc:
+                    last_parse_error = exc
 
+        if last_parse_error is not None:
+            raise ArduinoVoltageError(f"timeout waiting for voltage reading after invalid lines: {last_parse_error}")
         raise ArduinoVoltageError("timeout waiting for voltage reading")
 
     def _error_payload(self, error: Exception | None) -> dict[str, Any]:

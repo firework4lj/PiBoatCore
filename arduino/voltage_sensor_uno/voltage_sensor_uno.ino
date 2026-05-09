@@ -10,7 +10,7 @@ const float CALIBRATION_MULTIPLIER = 1.0;
 const int SAMPLE_COUNT = 25;
 const unsigned long REPORT_INTERVAL_MS = 1000;
 
-unsigned long lastReportMs = 0;
+unsigned long lastReportMs = REPORT_INTERVAL_MS;
 
 void setup() {
   Serial.begin(115200);
@@ -29,7 +29,7 @@ void loop() {
   const bool charging = voltage >= 13.2;
   const int socEstimate = estimateLeadAcidSoc(voltage);
 
-  Serial.print("{\"type\":\"battery_voltage\",\"pin\":\"A1\",\"voltage\":");
+  Serial.print("{\"type\":\"battery_voltage\",\"pin\":\"A0\",\"voltage\":");
   Serial.print(voltage, 3);
   Serial.print(",\"charging\":");
   Serial.print(charging ? "true" : "false");
