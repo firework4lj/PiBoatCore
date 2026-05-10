@@ -4,6 +4,7 @@ import asyncio
 import argparse
 import logging
 import signal
+from datetime import UTC, datetime
 from typing import Any
 
 from pi_boat_core.camera import capture_snapshot
@@ -39,6 +40,9 @@ class BoatTelemetryService:
         self.sensors = sensors
         self.sequence = 0
         self._stop = asyncio.Event()
+        self._camera_wakeup = asyncio.Event()
+        self._live_snapshot_until_epoch = 0.0
+        self._live_snapshot_interval_seconds = 2.0
 
     def stop(self) -> None:
         self._stop.set()
@@ -74,8 +78,8 @@ class BoatTelemetryService:
 
             try:
                 await asyncio.wait_for(
-                    self._stop.wait(),
-                    timeout=self.config.camera.interval_seconds,
+                    self._wait_for_camera_event(),
+                    timeout=self.camera_interval_seconds(),
                 )
             except TimeoutError:
                 pass
@@ -129,7 +133,8 @@ class BoatTelemetryService:
 
     async def post_or_spool(self, payload: dict[str, Any]) -> None:
         try:
-            await asyncio.to_thread(self.client.post_heartbeat, payload)
+            response = await asyncio.to_thread(self.client.post_heartbeat, payload)
+            self.apply_server_commands(response)
             LOGGER.info("sent heartbeat sequence=%s", _payload_sequence(payload))
         except TelemetryPostError as exc:
             self.spool.enqueue(payload)
@@ -149,6 +154,42 @@ class BoatTelemetryService:
             LOGGER.info("sent camera snapshot bytes=%s", len(image))
         except Exception as exc:
             LOGGER.warning("camera snapshot failed: %s", exc)
+
+    async def _wait_for_camera_event(self) -> None:
+        stop_task = asyncio.create_task(self._stop.wait())
+        camera_task = asyncio.create_task(self._camera_wakeup.wait())
+        done, pending = await asyncio.wait(
+            {stop_task, camera_task},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        for task in pending:
+            task.cancel()
+        if camera_task in done:
+            self._camera_wakeup.clear()
+
+    def camera_interval_seconds(self) -> float:
+        if self.live_camera_active():
+            return self._live_snapshot_interval_seconds
+        return self.config.camera.interval_seconds
+
+    def live_camera_active(self) -> bool:
+        return time_now_epoch() < self._live_snapshot_until_epoch
+
+    def apply_server_commands(self, response: dict[str, Any]) -> None:
+        live = response.get("commands", {}).get("camera_live", {})
+        if not live.get("active"):
+            self._live_snapshot_until_epoch = 0.0
+            return
+
+        until = _parse_iso_epoch(live.get("until"))
+        interval = live.get("interval_seconds")
+        if until is None:
+            return
+
+        self._live_snapshot_until_epoch = until
+        if isinstance(interval, int | float) and interval > 0:
+            self._live_snapshot_interval_seconds = float(interval)
+        self._camera_wakeup.set()
 
 
 def build_default_service(config: Config) -> BoatTelemetryService:
@@ -182,6 +223,19 @@ def _payload_sequence(payload: dict[str, Any]) -> Any:
         if len(parts) >= 4:
             return parts[3]
     return "unknown"
+
+
+def time_now_epoch() -> float:
+    return datetime.now(UTC).timestamp()
+
+
+def _parse_iso_epoch(value: Any) -> float | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
 
 
 async def async_main() -> None:

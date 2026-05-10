@@ -17,6 +17,9 @@ class TelemetryClientTests(unittest.TestCase):
             def __exit__(self, *_args):
                 return None
 
+            def read(self):
+                return b'{"status":"accepted"}'
+
         def fake_urlopen(request, timeout):
             captured["authorization"] = request.headers.get("Authorization")
             captured["timeout"] = timeout
@@ -29,10 +32,11 @@ class TelemetryClientTests(unittest.TestCase):
         )
 
         with patch("urllib.request.urlopen", fake_urlopen):
-            client.post_heartbeat({"t": "1,boat,device,1,2026-05-03T00:00:00Z,ok"})
+            response = client.post_heartbeat({"t": "1,boat,device,1,2026-05-03T00:00:00Z,ok"})
 
         self.assertEqual(captured["authorization"], "Bearer secret-token")
         self.assertEqual(captured["timeout"], 5)
+        self.assertEqual(response["status"], "accepted")
 
     def test_post_snapshot_posts_jpeg_to_snapshot_endpoint(self) -> None:
         captured = {}

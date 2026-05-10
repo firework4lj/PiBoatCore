@@ -17,7 +17,7 @@ class TelemetryClient:
     timeout_seconds: float
     api_token: str = ""
 
-    def post_heartbeat(self, payload: dict[str, Any]) -> None:
+    def post_heartbeat(self, payload: dict[str, Any]) -> dict[str, Any]:
         body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
         headers = {"Content-Type": "application/json"}
         if self.api_token:
@@ -34,6 +34,10 @@ class TelemetryClient:
             with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
                 if response.status < 200 or response.status >= 300:
                     raise TelemetryPostError(f"server returned HTTP {response.status}")
+                body = response.read()
+                if not body:
+                    return {}
+                return json.loads(body.decode("utf-8"))
         except (TimeoutError, urllib.error.URLError, urllib.error.HTTPError) as exc:
             raise TelemetryPostError(str(exc)) from exc
 
