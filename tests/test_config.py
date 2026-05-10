@@ -49,6 +49,7 @@ class ConfigTests(unittest.TestCase):
                 height = 240
                 jpeg_quality = 45
                 capture_command = "fswebcam"
+                rotation_degrees = 180
 
                 [arduino_voltage]
                 enabled = true
@@ -87,6 +88,7 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.camera.width, 320)
         self.assertEqual(config.camera.height, 240)
         self.assertEqual(config.camera.jpeg_quality, 45)
+        self.assertEqual(config.camera.rotation_degrees, 180)
         self.assertTrue(config.arduino_voltage.enabled)
         self.assertEqual(config.arduino_voltage.port, "/dev/ttyACM1")
         self.assertEqual(config.arduino_voltage.baudrate, 9600)
@@ -111,6 +113,7 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.sim7600.restart_gnss_after_no_fix, 10)
         self.assertFalse(config.camera.enabled)
         self.assertEqual(config.camera.device, "/dev/video0")
+        self.assertEqual(config.camera.rotation_degrees, 0)
         self.assertFalse(config.arduino_voltage.enabled)
         self.assertEqual(config.arduino_voltage.port, "/dev/ttyACM0")
         self.assertEqual(config.arduino_voltage.timeout_seconds, 5)

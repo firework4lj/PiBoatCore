@@ -34,6 +34,7 @@ class CameraConfig:
     height: int
     jpeg_quality: int
     capture_command: str
+    rotation_degrees: int
 
 
 @dataclass(frozen=True)
@@ -95,6 +96,7 @@ class Config:
                 height=int(_get(data, "camera", "height", default=360)),
                 jpeg_quality=int(_get(data, "camera", "jpeg_quality", default=55)),
                 capture_command=_get(data, "camera", "capture_command", default="fswebcam"),
+                rotation_degrees=int(_get(data, "camera", "rotation_degrees", default=0)),
             ),
             arduino_voltage=ArduinoVoltageConfig(
                 enabled=bool(_get(data, "arduino_voltage", "enabled", default=False)),

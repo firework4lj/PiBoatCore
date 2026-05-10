@@ -36,6 +36,7 @@ width = 640
 height = 360
 jpeg_quality = 55
 capture_command = "fswebcam"
+rotation_degrees = 0
 
 [arduino_voltage]
 enabled = false

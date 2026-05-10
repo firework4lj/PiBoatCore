@@ -17,6 +17,10 @@ EXPOSURE_SETTLE_FRAMES = 20
 def capture_snapshot(config: CameraConfig) -> bytes:
     with tempfile.TemporaryDirectory() as temp_dir:
         output_path = Path(temp_dir) / "snapshot.jpg"
+        rotation_args = []
+        if config.rotation_degrees:
+            rotation_args = ["--rotate", str(config.rotation_degrees)]
+
         command = [
             config.capture_command,
             "--device",
@@ -27,6 +31,7 @@ def capture_snapshot(config: CameraConfig) -> bytes:
             str(config.jpeg_quality),
             "--skip",
             str(EXPOSURE_SETTLE_FRAMES),
+            *rotation_args,
             "--quiet",
             str(output_path),
         ]
