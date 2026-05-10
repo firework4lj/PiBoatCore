@@ -21,6 +21,8 @@ class Sim7600Config:
     enable_gnss: bool
     max_attempts: int
     retry_delay_seconds: float
+    reset_after_failures: int
+    restart_gnss_after_no_fix: int
 
 
 @dataclass(frozen=True)
@@ -82,6 +84,8 @@ class Config:
                 enable_gnss=bool(_get(data, "sim7600", "enable_gnss", default=True)),
                 max_attempts=int(_get(data, "sim7600", "max_attempts", default=2)),
                 retry_delay_seconds=float(_get(data, "sim7600", "retry_delay_seconds", default=1)),
+                reset_after_failures=int(_get(data, "sim7600", "reset_after_failures", default=5)),
+                restart_gnss_after_no_fix=int(_get(data, "sim7600", "restart_gnss_after_no_fix", default=10)),
             ),
             camera=CameraConfig(
                 enabled=bool(_get(data, "camera", "enabled", default=False)),

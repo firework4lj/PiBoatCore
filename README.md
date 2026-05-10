@@ -71,6 +71,8 @@ timeout_seconds = 2
 enable_gnss = true
 max_attempts = 2
 retry_delay_seconds = 1
+reset_after_failures = 5
+restart_gnss_after_no_fix = 10
 ```
 
 The exact serial port can vary by Pi image and modem mode. On the Pi, check:

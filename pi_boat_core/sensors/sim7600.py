@@ -31,6 +31,7 @@ class Sim7600Sensor(SensorAdapter):
         self.config = config
         self._gnss_started = False
         self._consecutive_failures = 0
+        self._consecutive_no_fix = 0
         self._last_success_monotonic: float | None = None
         self._last_success_payload: dict[str, Any] | None = None
 
@@ -54,6 +55,8 @@ class Sim7600Sensor(SensorAdapter):
                     time.sleep(self.config.retry_delay_seconds)
 
         self._consecutive_failures += 1
+        if self._should_reset_modem():
+            self._reset_modem()
         return self._error_payload(last_error)
 
     def _read_once(self) -> dict[str, Any]:
@@ -80,6 +83,7 @@ class Sim7600Sensor(SensorAdapter):
             operator = parse_operator(self._command(modem, "AT+COPS?", allow_error=True))
             network = parse_cpsi(self._command(modem, "AT+CPSI?", allow_error=True))
             gnss = parse_cgpsinfo(self._command(modem, "AT+CGPSINFO", allow_error=True))
+            self._update_gnss_recovery(modem, gnss)
 
         status = "ok" if registration.get("registered") or packet_registration.get("registered") else "warning"
 
@@ -87,6 +91,7 @@ class Sim7600Sensor(SensorAdapter):
             "status": status,
             "port": self.config.port,
             "consecutive_failures": 0,
+            "consecutive_no_fix": self._consecutive_no_fix,
             "last_success_age_seconds": 0,
             "signal": csq,
             "registration": registration,
@@ -120,6 +125,47 @@ class Sim7600Sensor(SensorAdapter):
             }
 
         return payload
+
+    def _update_gnss_recovery(self, modem: Any, gnss: dict[str, Any]) -> None:
+        if not self.config.enable_gnss:
+            return
+
+        if gnss.get("fix") is True:
+            self._consecutive_no_fix = 0
+            return
+
+        self._consecutive_no_fix += 1
+        if self._should_restart_gnss():
+            self._command(modem, "AT+CGPS=0", allow_error=True)
+            time.sleep(1)
+            self._command(modem, "AT+CGPS=1", allow_error=True)
+            self._consecutive_no_fix = 0
+
+    def _should_restart_gnss(self) -> bool:
+        threshold = self.config.restart_gnss_after_no_fix
+        return threshold > 0 and self._consecutive_no_fix >= threshold
+
+    def _should_reset_modem(self) -> bool:
+        threshold = self.config.reset_after_failures
+        return threshold > 0 and self._consecutive_failures >= threshold
+
+    def _reset_modem(self) -> None:
+        try:
+            import serial
+        except ImportError:
+            return
+
+        try:
+            with serial.Serial(
+                self.config.port,
+                self.config.baudrate,
+                timeout=self.config.timeout_seconds,
+                write_timeout=self.config.timeout_seconds,
+            ) as modem:
+                self._command(modem, "AT+CRESET", allow_error=True)
+                self._gnss_started = False
+        except Exception:
+            return
 
     def _command(self, modem: Any, command: str, *, allow_error: bool = False) -> list[str]:
         modem.reset_input_buffer()

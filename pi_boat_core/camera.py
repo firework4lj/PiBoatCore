@@ -11,6 +11,9 @@ class CameraCaptureError(RuntimeError):
     pass
 
 
+EXPOSURE_SETTLE_FRAMES = 20
+
+
 def capture_snapshot(config: CameraConfig) -> bytes:
     with tempfile.TemporaryDirectory() as temp_dir:
         output_path = Path(temp_dir) / "snapshot.jpg"
@@ -22,6 +25,8 @@ def capture_snapshot(config: CameraConfig) -> bytes:
             f"{config.width}x{config.height}",
             "--jpeg",
             str(config.jpeg_quality),
+            "--skip",
+            str(EXPOSURE_SETTLE_FRAMES),
             "--quiet",
             str(output_path),
         ]

@@ -15,6 +15,8 @@ class FlakySim7600Sensor(Sim7600Sensor):
                 enable_gnss=True,
                 max_attempts=2,
                 retry_delay_seconds=0,
+                reset_after_failures=5,
+                restart_gnss_after_no_fix=10,
             )
         )
         self.calls = 0
@@ -46,6 +48,8 @@ class FailedSim7600Sensor(Sim7600Sensor):
                 enable_gnss=True,
                 max_attempts=2,
                 retry_delay_seconds=0,
+                reset_after_failures=5,
+                restart_gnss_after_no_fix=10,
             )
         )
 
@@ -81,3 +85,20 @@ class Sim7600ResilienceTests(unittest.TestCase):
         self.assertEqual(payload["status"], "error")
         self.assertIn("last_known", payload)
         self.assertEqual(payload["last_known"]["gnss"], {"fix": True})
+
+    def test_should_restart_gnss_after_threshold(self) -> None:
+        sensor = FlakySim7600Sensor()
+        sensor.config = Sim7600Config(
+            enabled=True,
+            port="/dev/ttyUSB2",
+            baudrate=115200,
+            timeout_seconds=2,
+            enable_gnss=True,
+            max_attempts=2,
+            retry_delay_seconds=0,
+            reset_after_failures=5,
+            restart_gnss_after_no_fix=2,
+        )
+        sensor._consecutive_no_fix = 2
+
+        self.assertTrue(sensor._should_restart_gnss())

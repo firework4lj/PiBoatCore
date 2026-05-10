@@ -38,6 +38,8 @@ class ConfigTests(unittest.TestCase):
                 enable_gnss = false
                 max_attempts = 4
                 retry_delay_seconds = 1.5
+                reset_after_failures = 9
+                restart_gnss_after_no_fix = 12
 
                 [camera]
                 enabled = true
@@ -77,6 +79,8 @@ class ConfigTests(unittest.TestCase):
         self.assertFalse(config.sim7600.enable_gnss)
         self.assertEqual(config.sim7600.max_attempts, 4)
         self.assertEqual(config.sim7600.retry_delay_seconds, 1.5)
+        self.assertEqual(config.sim7600.reset_after_failures, 9)
+        self.assertEqual(config.sim7600.restart_gnss_after_no_fix, 12)
         self.assertTrue(config.camera.enabled)
         self.assertEqual(config.camera.device, "/dev/video2")
         self.assertEqual(config.camera.interval_seconds, 600)
@@ -103,6 +107,8 @@ class ConfigTests(unittest.TestCase):
         self.assertFalse(config.sim7600.enabled)
         self.assertEqual(config.sim7600.port, "/dev/ttyUSB2")
         self.assertEqual(config.sim7600.max_attempts, 2)
+        self.assertEqual(config.sim7600.reset_after_failures, 5)
+        self.assertEqual(config.sim7600.restart_gnss_after_no_fix, 10)
         self.assertFalse(config.camera.enabled)
         self.assertEqual(config.camera.device, "/dev/video0")
         self.assertFalse(config.arduino_voltage.enabled)
