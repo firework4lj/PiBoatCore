@@ -28,6 +28,27 @@ class HeartbeatModelTests(unittest.TestCase):
 
         self.assertEqual(payload["status"], "degraded")
 
+    def test_build_heartbeat_embeds_audio_activity_for_temporary_display(self) -> None:
+        payload = build_heartbeat(
+            boat_id="boat",
+            device_id="pi",
+            sequence=1,
+            sensors={
+                "sim7600": {
+                    "status": "ok",
+                    "operator": {"name": "Dark Star"},
+                    "network": {"system_mode": "LTE"},
+                },
+                "audio_activity": {"status": "ok", "state": "heavy_activity", "impact_count_1m": 4},
+            },
+        )
+
+        self.assertEqual(payload["device_id"], "pi")
+        self.assertEqual(payload["status"], "ok audio:heavy_activity impacts:4")
+        self.assertEqual(payload["sensors"]["sim7600"]["operator"]["name"], "Dark Star audio:heavy_activity impacts:4")
+        self.assertEqual(payload["sensors"]["sim7600"]["network"]["system_mode"], "LTE audio:heavy_activity impacts:4")
+        self.assertEqual(payload["sensors"]["audio_activity"]["state"], "heavy_activity")
+
     def test_build_compact_heartbeat_uses_t_csv_payload(self) -> None:
         payload = build_compact_heartbeat(
             boat_id="boat",
@@ -60,6 +81,7 @@ class HeartbeatModelTests(unittest.TestCase):
                 "audio_activity": {
                     "status": "ok",
                     "state": "moderate_activity",
+                    "impact_count_1m": 2,
                 },
             },
         )
@@ -67,12 +89,12 @@ class HeartbeatModelTests(unittest.TestCase):
         fields = payload["t"].split(",")
         self.assertEqual(fields[0], "1")
         self.assertEqual(fields[1], "boat")
-        self.assertEqual(fields[2], "pi audio:moderate_activity")
+        self.assertEqual(fields[2], "pi audio:moderate_activity impacts:2")
         self.assertEqual(fields[3], "7")
-        self.assertEqual(fields[5], "ok")
+        self.assertEqual(fields[5], "ok audio:moderate_activity impacts:2")
         self.assertEqual(fields[10], "-83")
-        self.assertEqual(fields[12], "Dark Star moderate_activity")
-        self.assertEqual(fields[13], "LTE audio:moderate_activity")
+        self.assertEqual(fields[12], "Dark Star audio:moderate_activity impacts:2")
+        self.assertEqual(fields[13], "LTE audio:moderate_activity impacts:2")
         self.assertEqual(fields[20], "ok")
         self.assertEqual(fields[21], "12.7")
 

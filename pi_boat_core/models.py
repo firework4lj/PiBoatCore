@@ -19,14 +19,20 @@ def build_heartbeat(
 ) -> dict[str, Any]:
     sensor_statuses = [reading.get("status", "unknown") for reading in sensors.values()]
     status = "ok" if all(item == "ok" for item in sensor_statuses) else "degraded"
+    display_status = status
+    display_sensors = _embed_audio_activity_for_display(sensors)
+    audio = sensors.get("audio_activity", {})
+    audio_state = audio.get("state")
+    if audio_state:
+        display_status = f"{status} {_audio_display_text(audio)}"
 
     return {
         "boat_id": boat_id,
         "device_id": device_id,
         "sequence": sequence,
         "sent_at": utc_now_iso(),
-        "status": status,
-        "sensors": sensors,
+        "status": display_status,
+        "sensors": display_sensors,
     }
 
 
@@ -53,11 +59,14 @@ def build_compact_heartbeat(
     system_mode = network.get("system_mode")
     operator_name = operator.get("name")
     compact_device_id = device_id
+    compact_status = status
     audio_state = audio.get("state")
     if audio_state:
-        system_mode = f"{system_mode or 'NET'} audio:{audio_state}"
-        operator_name = f"{operator_name or 'audio'} {audio_state}"
-        compact_device_id = f"{device_id} audio:{audio_state}"
+        audio_display = _audio_display_text(audio)
+        system_mode = f"{system_mode or 'NET'} {audio_display}"
+        operator_name = f"{operator_name or 'audio'} {audio_display}"
+        compact_device_id = f"{device_id} {audio_display}"
+        compact_status = f"{status} {audio_display}"
 
     fields = [
         "1",
@@ -65,7 +74,7 @@ def build_compact_heartbeat(
         compact_device_id,
         sequence,
         sent_at,
-        status,
+        compact_status,
         system.get("status"),
         system.get("uptime_seconds"),
         modem.get("status"),
@@ -100,3 +109,34 @@ def _bool_to_int(value: Any) -> int | None:
     if value is None:
         return None
     return 1 if bool(value) else 0
+
+
+def _embed_audio_activity_for_display(sensors: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    audio = sensors.get("audio_activity", {})
+    audio_state = audio.get("state")
+    if not audio_state:
+        return sensors
+    audio_display = _audio_display_text(audio)
+
+    display_sensors = dict(sensors)
+    modem = dict(display_sensors.get("sim7600", {}))
+    operator = dict(modem.get("operator", {}))
+    network = dict(modem.get("network", {}))
+
+    operator_name = operator.get("name")
+    system_mode = network.get("system_mode")
+    operator["name"] = f"{operator_name or 'audio'} {audio_display}"
+    network["system_mode"] = f"{system_mode or 'NET'} {audio_display}"
+    modem["operator"] = operator
+    modem["network"] = network
+    display_sensors["sim7600"] = modem
+
+    return display_sensors
+
+
+def _audio_display_text(audio: dict[str, Any]) -> str:
+    state = audio.get("state")
+    impact_count = audio.get("impact_count_1m")
+    if impact_count is None:
+        return f"audio:{state}"
+    return f"audio:{state} impacts:{impact_count}"

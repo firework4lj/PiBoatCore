@@ -53,7 +53,16 @@ class AudioActivitySensor(SensorAdapter):
 
         avg_rms_db = sum(sample["rms_db"] for sample in recent) / len(recent)
         peak_db = max(sample["peak_db"] for sample in recent)
-        impact_count = sum(1 for sample in recent if sample["peak_db"] >= self.config.impact_threshold_db)
+        impact_count = sum(
+            1
+            for sample in recent
+            if is_impact_sample(
+                rms_db=sample["rms_db"],
+                peak_db=sample["peak_db"],
+                impact_threshold_db=self.config.impact_threshold_db,
+                min_peak_delta_db=self.config.impact_min_peak_delta_db,
+            )
+        )
         state = classify_audio_activity(
             avg_rms_db=avg_rms_db,
             peak_db=peak_db,
@@ -67,6 +76,7 @@ class AudioActivitySensor(SensorAdapter):
             "state": state,
             "rms_db": round(avg_rms_db, 1),
             "peak_db": round(peak_db, 1),
+            "peak_over_rms_db": round(peak_db - avg_rms_db, 1),
             "impact_count_1m": impact_count,
             "samples": len(recent),
             "last_sample_age_seconds": age,
@@ -163,6 +173,16 @@ def amplitude_to_db(value: int | float) -> float:
     return 20 * math.log10(min(value, 32767) / 32767)
 
 
+def is_impact_sample(
+    *,
+    rms_db: float,
+    peak_db: float,
+    impact_threshold_db: float,
+    min_peak_delta_db: float,
+) -> bool:
+    return peak_db >= impact_threshold_db and peak_db - rms_db >= min_peak_delta_db
+
+
 def classify_audio_activity(
     *,
     avg_rms_db: float,
@@ -171,10 +191,12 @@ def classify_audio_activity(
     moderate_threshold_db: float,
     heavy_threshold_db: float,
 ) -> str:
-    if impact_count >= 3 or peak_db >= -6:
+    if impact_count >= 3:
         return "impact_detected"
-    if avg_rms_db >= heavy_threshold_db or impact_count >= 1:
+    if avg_rms_db >= heavy_threshold_db:
         return "heavy_activity"
+    if impact_count >= 1:
+        return "possible_impact"
     if avg_rms_db >= moderate_threshold_db:
         return "moderate_activity"
     if avg_rms_db >= moderate_threshold_db - 10:

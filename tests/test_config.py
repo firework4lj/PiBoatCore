@@ -66,6 +66,7 @@ class ConfigTests(unittest.TestCase):
                 chunk_seconds = 0.25
                 window_seconds = 45
                 impact_threshold_db = -8
+                impact_min_peak_delta_db = 16
                 moderate_threshold_db = -35
                 heavy_threshold_db = -24
                 """,
@@ -109,6 +110,7 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.audio_activity.chunk_seconds, 0.25)
         self.assertEqual(config.audio_activity.window_seconds, 45)
         self.assertEqual(config.audio_activity.impact_threshold_db, -8)
+        self.assertEqual(config.audio_activity.impact_min_peak_delta_db, 16)
         self.assertEqual(config.audio_activity.moderate_threshold_db, -35)
         self.assertEqual(config.audio_activity.heavy_threshold_db, -24)
 
@@ -140,6 +142,7 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.audio_activity.sample_rate, 16000)
         self.assertEqual(config.audio_activity.chunk_seconds, 0.5)
         self.assertEqual(config.audio_activity.window_seconds, 60)
-        self.assertEqual(config.audio_activity.impact_threshold_db, -10)
+        self.assertEqual(config.audio_activity.impact_threshold_db, -4)
+        self.assertEqual(config.audio_activity.impact_min_peak_delta_db, 20)
         self.assertEqual(config.audio_activity.moderate_threshold_db, -32)
-        self.assertEqual(config.audio_activity.heavy_threshold_db, -22)
+        self.assertEqual(config.audio_activity.heavy_threshold_db, -18)

@@ -55,6 +55,7 @@ class AudioActivityConfig:
     chunk_seconds: float
     window_seconds: float
     impact_threshold_db: float
+    impact_min_peak_delta_db: float
     moderate_threshold_db: float
     heavy_threshold_db: float
 
@@ -125,9 +126,10 @@ class Config:
                 sample_rate=int(_get(data, "audio_activity", "sample_rate", default=16000)),
                 chunk_seconds=float(_get(data, "audio_activity", "chunk_seconds", default=0.5)),
                 window_seconds=float(_get(data, "audio_activity", "window_seconds", default=60)),
-                impact_threshold_db=float(_get(data, "audio_activity", "impact_threshold_db", default=-10)),
+                impact_threshold_db=float(_get(data, "audio_activity", "impact_threshold_db", default=-4)),
+                impact_min_peak_delta_db=float(_get(data, "audio_activity", "impact_min_peak_delta_db", default=20)),
                 moderate_threshold_db=float(_get(data, "audio_activity", "moderate_threshold_db", default=-32)),
-                heavy_threshold_db=float(_get(data, "audio_activity", "heavy_threshold_db", default=-22)),
+                heavy_threshold_db=float(_get(data, "audio_activity", "heavy_threshold_db", default=-18)),
             ),
         )
 
