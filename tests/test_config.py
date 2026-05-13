@@ -58,6 +58,16 @@ class ConfigTests(unittest.TestCase):
                 timeout_seconds = 4
                 max_attempts = 3
                 retry_delay_seconds = 0.5
+
+                [audio_activity]
+                enabled = true
+                device = "plughw:1,0"
+                sample_rate = 8000
+                chunk_seconds = 0.25
+                window_seconds = 45
+                impact_threshold_db = -8
+                moderate_threshold_db = -35
+                heavy_threshold_db = -24
                 """,
                 encoding="utf-8",
             )
@@ -93,6 +103,14 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.arduino_voltage.port, "/dev/ttyACM1")
         self.assertEqual(config.arduino_voltage.baudrate, 9600)
         self.assertEqual(config.arduino_voltage.timeout_seconds, 4)
+        self.assertTrue(config.audio_activity.enabled)
+        self.assertEqual(config.audio_activity.device, "plughw:1,0")
+        self.assertEqual(config.audio_activity.sample_rate, 8000)
+        self.assertEqual(config.audio_activity.chunk_seconds, 0.25)
+        self.assertEqual(config.audio_activity.window_seconds, 45)
+        self.assertEqual(config.audio_activity.impact_threshold_db, -8)
+        self.assertEqual(config.audio_activity.moderate_threshold_db, -35)
+        self.assertEqual(config.audio_activity.heavy_threshold_db, -24)
 
     def test_from_file_uses_defaults_when_no_file_is_available(self) -> None:
         config = Config.from_file(None)
@@ -117,3 +135,11 @@ class ConfigTests(unittest.TestCase):
         self.assertFalse(config.arduino_voltage.enabled)
         self.assertEqual(config.arduino_voltage.port, "/dev/ttyACM0")
         self.assertEqual(config.arduino_voltage.timeout_seconds, 5)
+        self.assertFalse(config.audio_activity.enabled)
+        self.assertEqual(config.audio_activity.device, "default")
+        self.assertEqual(config.audio_activity.sample_rate, 16000)
+        self.assertEqual(config.audio_activity.chunk_seconds, 0.5)
+        self.assertEqual(config.audio_activity.window_seconds, 60)
+        self.assertEqual(config.audio_activity.impact_threshold_db, -10)
+        self.assertEqual(config.audio_activity.moderate_threshold_db, -32)
+        self.assertEqual(config.audio_activity.heavy_threshold_db, -22)

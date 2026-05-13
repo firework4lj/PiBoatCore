@@ -48,6 +48,18 @@ class ArduinoVoltageConfig:
 
 
 @dataclass(frozen=True)
+class AudioActivityConfig:
+    enabled: bool
+    device: str
+    sample_rate: int
+    chunk_seconds: float
+    window_seconds: float
+    impact_threshold_db: float
+    moderate_threshold_db: float
+    heavy_threshold_db: float
+
+
+@dataclass(frozen=True)
 class Config:
     boat_id: str
     device_id: str
@@ -61,6 +73,7 @@ class Config:
     sim7600: Sim7600Config
     camera: CameraConfig
     arduino_voltage: ArduinoVoltageConfig
+    audio_activity: AudioActivityConfig
 
     @classmethod
     def from_file(cls, path: str | Path | None = None) -> "Config":
@@ -105,6 +118,16 @@ class Config:
                 timeout_seconds=float(_get(data, "arduino_voltage", "timeout_seconds", default=5)),
                 max_attempts=int(_get(data, "arduino_voltage", "max_attempts", default=2)),
                 retry_delay_seconds=float(_get(data, "arduino_voltage", "retry_delay_seconds", default=1)),
+            ),
+            audio_activity=AudioActivityConfig(
+                enabled=bool(_get(data, "audio_activity", "enabled", default=False)),
+                device=_get(data, "audio_activity", "device", default="default"),
+                sample_rate=int(_get(data, "audio_activity", "sample_rate", default=16000)),
+                chunk_seconds=float(_get(data, "audio_activity", "chunk_seconds", default=0.5)),
+                window_seconds=float(_get(data, "audio_activity", "window_seconds", default=60)),
+                impact_threshold_db=float(_get(data, "audio_activity", "impact_threshold_db", default=-10)),
+                moderate_threshold_db=float(_get(data, "audio_activity", "moderate_threshold_db", default=-32)),
+                heavy_threshold_db=float(_get(data, "audio_activity", "heavy_threshold_db", default=-22)),
             ),
         )
 

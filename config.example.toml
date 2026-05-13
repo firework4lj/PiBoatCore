@@ -45,3 +45,13 @@ baudrate = 115200
 timeout_seconds = 5
 max_attempts = 2
 retry_delay_seconds = 1
+
+[audio_activity]
+enabled = false
+device = "default"
+sample_rate = 16000
+chunk_seconds = 0.5
+window_seconds = 60
+impact_threshold_db = -10
+moderate_threshold_db = -32
+heavy_threshold_db = -22

@@ -13,6 +13,7 @@ from pi_boat_core.config import Config
 from pi_boat_core.models import build_compact_heartbeat, build_heartbeat, utc_now_iso
 from pi_boat_core.sensors import (
     ArduinoVoltageSensor,
+    AudioActivitySensor,
     MockBatterySocSensor,
     MockBilgeSensor,
     MockGpsSensor,
@@ -198,6 +199,8 @@ def build_default_service(config: Config) -> BoatTelemetryService:
         sensors.append(Sim7600Sensor(config.sim7600))
     if config.arduino_voltage.enabled:
         sensors.append(ArduinoVoltageSensor(config.arduino_voltage))
+    if config.audio_activity.enabled:
+        sensors.append(AudioActivitySensor(config.audio_activity))
 
     if config.mock_sensors:
         sensors.extend([MockGpsSensor(), MockBilgeSensor(), MockBatterySocSensor()])
