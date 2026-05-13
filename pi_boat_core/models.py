@@ -51,9 +51,11 @@ def build_compact_heartbeat(
     voltage = sensors.get("arduino_voltage", {})
     audio = sensors.get("audio_activity", {})
     system_mode = network.get("system_mode")
+    operator_name = operator.get("name")
     audio_state = audio.get("state")
     if audio_state:
         system_mode = f"{system_mode or 'NET'} audio:{audio_state}"
+        operator_name = f"{operator_name or 'audio'} {audio_state}"
 
     fields = [
         "1",
@@ -68,7 +70,7 @@ def build_compact_heartbeat(
         modem.get("consecutive_failures"),
         signal.get("rssi_dbm"),
         _bool_to_int(registration.get("registered")),
-        operator.get("name"),
+        operator_name,
         system_mode,
         _bool_to_int(gnss.get("fix")),
         gnss.get("latitude"),

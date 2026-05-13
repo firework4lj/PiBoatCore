@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import logging
 import subprocess
 import threading
 import time
@@ -9,6 +10,8 @@ from typing import Any
 
 from pi_boat_core.config import AudioActivityConfig
 from pi_boat_core.sensors.base import SensorAdapter
+
+LOGGER = logging.getLogger("piboatcore.audio")
 
 
 class AudioActivitySensor(SensorAdapter):
@@ -21,6 +24,7 @@ class AudioActivitySensor(SensorAdapter):
         self._started = False
         self._last_error: str | None = None
         self._last_sample_monotonic: float | None = None
+        self._logged_first_sample = False
 
     async def read(self) -> dict[str, Any]:
         self._ensure_started()
@@ -73,6 +77,7 @@ class AudioActivitySensor(SensorAdapter):
         if self._started:
             return
         self._started = True
+        LOGGER.info("starting audio activity monitor device=%s sample_rate=%s", self.config.device, self.config.sample_rate)
         thread = threading.Thread(target=self._monitor_audio, name="piboat-audio-activity", daemon=True)
         thread.start()
 
@@ -91,6 +96,7 @@ class AudioActivitySensor(SensorAdapter):
             except Exception as exc:
                 with self._lock:
                     self._last_error = str(exc)
+                LOGGER.warning("audio activity monitor failed: %s", exc)
                 try:
                     process.kill()
                     process.wait(timeout=2)
@@ -126,6 +132,9 @@ class AudioActivitySensor(SensorAdapter):
             self._last_error = None
             self._last_sample_monotonic = sample["monotonic"]
             self._samples.append(sample)
+            if not self._logged_first_sample:
+                self._logged_first_sample = True
+                LOGGER.info("audio activity monitor receiving samples")
             cutoff = sample["monotonic"] - max(self.config.window_seconds * 2, 120)
             while self._samples and self._samples[0]["monotonic"] < cutoff:
                 self._samples.popleft()

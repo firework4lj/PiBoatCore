@@ -200,6 +200,7 @@ def build_default_service(config: Config) -> BoatTelemetryService:
     if config.arduino_voltage.enabled:
         sensors.append(ArduinoVoltageSensor(config.arduino_voltage))
     if config.audio_activity.enabled:
+        LOGGER.info("audio activity sensor enabled device=%s", config.audio_activity.device)
         sensors.append(AudioActivitySensor(config.audio_activity))
 
     if config.mock_sensors:

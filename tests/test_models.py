@@ -71,6 +71,7 @@ class HeartbeatModelTests(unittest.TestCase):
         self.assertEqual(fields[3], "7")
         self.assertEqual(fields[5], "ok")
         self.assertEqual(fields[10], "-83")
+        self.assertEqual(fields[12], "Dark Star moderate_activity")
         self.assertEqual(fields[13], "LTE audio:moderate_activity")
         self.assertEqual(fields[20], "ok")
         self.assertEqual(fields[21], "12.7")
