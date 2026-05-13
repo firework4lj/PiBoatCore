@@ -67,7 +67,7 @@ class HeartbeatModelTests(unittest.TestCase):
         fields = payload["t"].split(",")
         self.assertEqual(fields[0], "1")
         self.assertEqual(fields[1], "boat")
-        self.assertEqual(fields[2], "pi")
+        self.assertEqual(fields[2], "pi audio:moderate_activity")
         self.assertEqual(fields[3], "7")
         self.assertEqual(fields[5], "ok")
         self.assertEqual(fields[10], "-83")

@@ -52,15 +52,17 @@ def build_compact_heartbeat(
     audio = sensors.get("audio_activity", {})
     system_mode = network.get("system_mode")
     operator_name = operator.get("name")
+    compact_device_id = device_id
     audio_state = audio.get("state")
     if audio_state:
         system_mode = f"{system_mode or 'NET'} audio:{audio_state}"
         operator_name = f"{operator_name or 'audio'} {audio_state}"
+        compact_device_id = f"{device_id} audio:{audio_state}"
 
     fields = [
         "1",
         boat_id,
-        device_id,
+        compact_device_id,
         sequence,
         sent_at,
         status,
