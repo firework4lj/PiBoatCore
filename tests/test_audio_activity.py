@@ -2,9 +2,11 @@ import unittest
 
 from pi_boat_core.sensors.audio_activity import (
     analyze_pcm16,
+    audio_event_trigger,
     amplitude_to_db,
     classify_audio_activity,
     is_impact_sample,
+    pcm16_to_wav,
 )
 
 
@@ -25,6 +27,14 @@ class AudioActivityTests(unittest.TestCase):
         self.assertAlmostEqual(rms, 2886.75, places=2)
         self.assertEqual(peak, 4000)
 
+    def test_pcm16_to_wav_wraps_audio_data(self) -> None:
+        pcm = int(1000).to_bytes(2, byteorder="little", signed=True) * 10
+        wav = pcm16_to_wav(pcm, sample_rate=16000)
+
+        self.assertTrue(wav.startswith(b"RIFF"))
+        self.assertIn(b"WAVE", wav[:16])
+        self.assertGreater(len(wav), len(pcm))
+
     def test_is_impact_sample_requires_loud_sharp_spike(self) -> None:
         self.assertFalse(
             is_impact_sample(
@@ -40,6 +50,37 @@ class AudioActivityTests(unittest.TestCase):
                 peak_db=-3,
                 impact_threshold_db=-4,
                 min_peak_delta_db=20,
+            ),
+        )
+
+    def test_audio_event_trigger_detects_impacts_and_heavy_activity(self) -> None:
+        self.assertEqual(
+            audio_event_trigger(
+                rms_db=-31,
+                peak_db=-3,
+                impact_threshold_db=-4,
+                min_peak_delta_db=20,
+                heavy_threshold_db=-18,
+            ),
+            "impact",
+        )
+        self.assertEqual(
+            audio_event_trigger(
+                rms_db=-17,
+                peak_db=-12,
+                impact_threshold_db=-4,
+                min_peak_delta_db=20,
+                heavy_threshold_db=-18,
+            ),
+            "heavy_activity",
+        )
+        self.assertIsNone(
+            audio_event_trigger(
+                rms_db=-30,
+                peak_db=-10,
+                impact_threshold_db=-4,
+                min_peak_delta_db=20,
+                heavy_threshold_db=-18,
             ),
         )
 

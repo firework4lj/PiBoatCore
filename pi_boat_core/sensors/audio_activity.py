@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import io
 import math
 import logging
 import subprocess
 import threading
 import time
+import wave
 from collections import deque
 from typing import Any
 
@@ -20,11 +22,14 @@ class AudioActivitySensor(SensorAdapter):
     def __init__(self, config: AudioActivityConfig) -> None:
         self.config = config
         self._samples: deque[dict[str, float]] = deque()
+        self._audio_chunks: deque[dict[str, Any]] = deque()
+        self._audio_events: deque[dict[str, Any]] = deque()
         self._lock = threading.Lock()
         self._started = False
         self._last_error: str | None = None
         self._last_sample_monotonic: float | None = None
         self._logged_first_sample = False
+        self._active_event: dict[str, Any] | None = None
 
     async def read(self) -> dict[str, Any]:
         self._ensure_started()
@@ -83,6 +88,17 @@ class AudioActivitySensor(SensorAdapter):
             "error": last_error,
         }
 
+    def pop_audio_events(self, limit: int = 3) -> list[dict[str, Any]]:
+        with self._lock:
+            events = []
+            while self._audio_events and len(events) < limit:
+                events.append(self._audio_events.popleft())
+            return events
+
+    def requeue_audio_event(self, event: dict[str, Any]) -> None:
+        with self._lock:
+            self._audio_events.appendleft(event)
+
     def _ensure_started(self) -> None:
         if self._started:
             return
@@ -132,8 +148,9 @@ class AudioActivitySensor(SensorAdapter):
 
     def _record_chunk(self, chunk: bytes) -> None:
         rms, peak = analyze_pcm16(chunk)
+        now = time.monotonic()
         sample = {
-            "monotonic": time.monotonic(),
+            "monotonic": now,
             "rms_db": amplitude_to_db(rms),
             "peak_db": amplitude_to_db(peak),
         }
@@ -145,9 +162,66 @@ class AudioActivitySensor(SensorAdapter):
             if not self._logged_first_sample:
                 self._logged_first_sample = True
                 LOGGER.info("audio activity monitor receiving samples")
+            self._audio_chunks.append({"monotonic": now, "pcm": chunk})
+            self._maybe_record_audio_event(sample)
             cutoff = sample["monotonic"] - max(self.config.window_seconds * 2, 120)
             while self._samples and self._samples[0]["monotonic"] < cutoff:
                 self._samples.popleft()
+            audio_cutoff = sample["monotonic"] - 20
+            while self._audio_chunks and self._audio_chunks[0]["monotonic"] < audio_cutoff:
+                self._audio_chunks.popleft()
+
+    def _maybe_record_audio_event(self, sample: dict[str, float]) -> None:
+        now = sample["monotonic"]
+        if self._active_event and now >= self._active_event["end_monotonic"]:
+            self._finish_audio_event(self._active_event)
+            self._active_event = None
+
+        if self._active_event:
+            return
+
+        trigger = audio_event_trigger(
+            rms_db=sample["rms_db"],
+            peak_db=sample["peak_db"],
+            impact_threshold_db=self.config.impact_threshold_db,
+            min_peak_delta_db=self.config.impact_min_peak_delta_db,
+            heavy_threshold_db=self.config.heavy_threshold_db,
+        )
+        if not trigger:
+            return
+
+        self._active_event = {
+            "trigger": trigger,
+            "trigger_monotonic": now,
+            "start_monotonic": now - 5,
+            "end_monotonic": now + 5,
+            "rms_db": sample["rms_db"],
+            "peak_db": sample["peak_db"],
+            "peak_over_rms_db": sample["peak_db"] - sample["rms_db"],
+        }
+
+    def _finish_audio_event(self, event: dict[str, Any]) -> None:
+        chunks = [
+            item["pcm"]
+            for item in self._audio_chunks
+            if event["start_monotonic"] <= item["monotonic"] <= event["end_monotonic"]
+        ]
+        if not chunks:
+            return
+
+        wav = pcm16_to_wav(b"".join(chunks), sample_rate=self.config.sample_rate)
+        self._audio_events.append(
+            {
+                "trigger": event["trigger"],
+                "rms_db": round(event["rms_db"], 1),
+                "peak_db": round(event["peak_db"], 1),
+                "peak_over_rms_db": round(event["peak_over_rms_db"], 1),
+                "duration_seconds": round(len(b"".join(chunks)) / (self.config.sample_rate * 2), 1),
+                "wav": wav,
+            }
+        )
+        while len(self._audio_events) > 20:
+            self._audio_events.popleft()
 
 
 def analyze_pcm16(chunk: bytes) -> tuple[float, int]:
@@ -171,6 +245,36 @@ def amplitude_to_db(value: int | float) -> float:
     if value <= 0:
         return -120.0
     return 20 * math.log10(min(value, 32767) / 32767)
+
+
+def pcm16_to_wav(pcm: bytes, *, sample_rate: int) -> bytes:
+    output = io.BytesIO()
+    with wave.open(output, "wb") as file:
+        file.setnchannels(1)
+        file.setsampwidth(2)
+        file.setframerate(sample_rate)
+        file.writeframes(pcm)
+    return output.getvalue()
+
+
+def audio_event_trigger(
+    *,
+    rms_db: float,
+    peak_db: float,
+    impact_threshold_db: float,
+    min_peak_delta_db: float,
+    heavy_threshold_db: float,
+) -> str | None:
+    if is_impact_sample(
+        rms_db=rms_db,
+        peak_db=peak_db,
+        impact_threshold_db=impact_threshold_db,
+        min_peak_delta_db=min_peak_delta_db,
+    ):
+        return "impact"
+    if rms_db >= heavy_threshold_db:
+        return "heavy_activity"
+    return None
 
 
 def is_impact_sample(

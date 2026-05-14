@@ -112,6 +112,7 @@ class BoatTelemetryService:
 
         await self.flush_spool()
         await self.post_or_spool(payload)
+        await self.post_audio_events()
 
     def format_payload(self, heartbeat: dict[str, Any], sensors: dict[str, dict[str, Any]]) -> dict[str, Any]:
         if self.config.payload_format == "compact":
@@ -171,6 +172,33 @@ class BoatTelemetryService:
         except Exception as exc:
             LOGGER.warning("camera snapshot failed: %s", exc)
             return False
+
+    async def post_audio_events(self) -> None:
+        for sensor in self.sensors:
+            pop_events = getattr(sensor, "pop_audio_events", None)
+            if not callable(pop_events):
+                continue
+            for event in pop_events():
+                try:
+                    await asyncio.to_thread(
+                        self.client.post_audio_event,
+                        boat_id=self.config.boat_id,
+                        device_id=self.config.device_id,
+                        sent_at=utc_now_iso(),
+                        trigger=event.get("trigger", "audio_event"),
+                        rms_db=event.get("rms_db"),
+                        peak_db=event.get("peak_db"),
+                        peak_over_rms_db=event.get("peak_over_rms_db"),
+                        duration_seconds=event.get("duration_seconds"),
+                        audio=event["wav"],
+                    )
+                    LOGGER.info("sent audio event trigger=%s bytes=%s", event.get("trigger"), len(event["wav"]))
+                except Exception as exc:
+                    requeue_event = getattr(sensor, "requeue_audio_event", None)
+                    if callable(requeue_event):
+                        requeue_event(event)
+                    LOGGER.warning("audio event upload failed: %s", exc)
+                    return
 
     async def _wait_for_camera_event(self) -> None:
         stop_task = asyncio.create_task(self._stop.wait())

@@ -65,3 +65,50 @@ class TelemetryClient:
                     raise TelemetryPostError(f"server returned HTTP {response.status}")
         except (TimeoutError, urllib.error.URLError, urllib.error.HTTPError) as exc:
             raise TelemetryPostError(str(exc)) from exc
+
+    def post_audio_event(
+        self,
+        *,
+        boat_id: str,
+        device_id: str,
+        sent_at: str,
+        trigger: str,
+        rms_db: float | None,
+        peak_db: float | None,
+        peak_over_rms_db: float | None,
+        duration_seconds: float | None,
+        audio: bytes,
+    ) -> None:
+        audio_url = self.server_url.rsplit("/", 1)[0] + "/audio-event"
+        headers = {
+            "Content-Type": "audio/wav",
+            "X-Boat-Id": boat_id,
+            "X-Device-Id": device_id,
+            "X-Sent-At": sent_at,
+            "X-Trigger": trigger,
+        }
+        optional_headers = {
+            "X-Rms-Db": rms_db,
+            "X-Peak-Db": peak_db,
+            "X-Peak-Over-Rms-Db": peak_over_rms_db,
+            "X-Duration-Seconds": duration_seconds,
+        }
+        for name, value in optional_headers.items():
+            if value is not None:
+                headers[name] = str(value)
+        if self.api_token:
+            headers["Authorization"] = f"Bearer {self.api_token}"
+
+        request = urllib.request.Request(
+            audio_url,
+            data=audio,
+            headers=headers,
+            method="POST",
+        )
+
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
+                if response.status < 200 or response.status >= 300:
+                    raise TelemetryPostError(f"server returned HTTP {response.status}")
+        except (TimeoutError, urllib.error.URLError, urllib.error.HTTPError) as exc:
+            raise TelemetryPostError(str(exc)) from exc
