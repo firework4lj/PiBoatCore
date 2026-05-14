@@ -44,6 +44,8 @@ class BoatTelemetryService:
         self._camera_wakeup = asyncio.Event()
         self._live_snapshot_until_epoch = 0.0
         self._live_snapshot_interval_seconds = 2.0
+        self._snapshot_requested = False
+        self._last_snapshot_request_id: str | None = None
 
     def stop(self) -> None:
         self._stop.set()
@@ -73,15 +75,27 @@ class BoatTelemetryService:
                 pass
 
     async def run_camera(self) -> None:
-        LOGGER.info("starting camera snapshots every %ss", self.config.camera.interval_seconds)
+        if self.config.camera.interval_seconds > 0:
+            LOGGER.info("starting camera snapshots every %ss", self.config.camera.interval_seconds)
+        else:
+            LOGGER.info("starting camera snapshots on demand")
+
         while not self._stop.is_set():
-            await self.capture_and_post_snapshot()
+            if self.should_capture_snapshot():
+                requested_snapshot = self._snapshot_requested
+                posted = await self.capture_and_post_snapshot()
+                if requested_snapshot and posted:
+                    self._snapshot_requested = False
+                elif requested_snapshot:
+                    self._snapshot_requested = False
+                    self._last_snapshot_request_id = None
 
             try:
-                await asyncio.wait_for(
-                    self._wait_for_camera_event(),
-                    timeout=self.camera_interval_seconds(),
-                )
+                timeout = self.camera_interval_seconds()
+                if timeout is None:
+                    await self._wait_for_camera_event()
+                else:
+                    await asyncio.wait_for(self._wait_for_camera_event(), timeout=timeout)
             except TimeoutError:
                 pass
 
@@ -141,7 +155,7 @@ class BoatTelemetryService:
             self.spool.enqueue(payload)
             LOGGER.warning("queued heartbeat sequence=%s error=%s", _payload_sequence(payload), exc)
 
-    async def capture_and_post_snapshot(self) -> None:
+    async def capture_and_post_snapshot(self) -> bool:
         sent_at = utc_now_iso()
         try:
             image = await asyncio.to_thread(capture_snapshot, self.config.camera)
@@ -153,8 +167,10 @@ class BoatTelemetryService:
                 image=image,
             )
             LOGGER.info("sent camera snapshot bytes=%s", len(image))
+            return True
         except Exception as exc:
             LOGGER.warning("camera snapshot failed: %s", exc)
+            return False
 
     async def _wait_for_camera_event(self) -> None:
         stop_task = asyncio.create_task(self._stop.wait())
@@ -168,16 +184,29 @@ class BoatTelemetryService:
         if camera_task in done:
             self._camera_wakeup.clear()
 
-    def camera_interval_seconds(self) -> float:
+    def should_capture_snapshot(self) -> bool:
+        return self._snapshot_requested or self.live_camera_active() or self.config.camera.interval_seconds > 0
+
+    def camera_interval_seconds(self) -> float | None:
         if self.live_camera_active():
             return self._live_snapshot_interval_seconds
+        if self.config.camera.interval_seconds <= 0:
+            return None
         return self.config.camera.interval_seconds
 
     def live_camera_active(self) -> bool:
         return time_now_epoch() < self._live_snapshot_until_epoch
 
     def apply_server_commands(self, response: dict[str, Any]) -> None:
-        live = response.get("commands", {}).get("camera_live", {})
+        commands = response.get("commands", {})
+        snapshot = commands.get("camera_snapshot", {})
+        request_id = snapshot.get("request_id")
+        if snapshot.get("requested") and isinstance(request_id, str) and request_id != self._last_snapshot_request_id:
+            self._last_snapshot_request_id = request_id
+            self._snapshot_requested = True
+            self._camera_wakeup.set()
+
+        live = commands.get("camera_live", {})
         if not live.get("active"):
             self._live_snapshot_until_epoch = 0.0
             return

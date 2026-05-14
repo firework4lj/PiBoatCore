@@ -105,7 +105,7 @@ class Config:
             camera=CameraConfig(
                 enabled=bool(_get(data, "camera", "enabled", default=False)),
                 device=_get(data, "camera", "device", default="/dev/video0"),
-                interval_seconds=float(_get(data, "camera", "interval_seconds", default=300)),
+                interval_seconds=float(_get(data, "camera", "interval_seconds", default=0)),
                 width=int(_get(data, "camera", "width", default=640)),
                 height=int(_get(data, "camera", "height", default=360)),
                 jpeg_quality=int(_get(data, "camera", "jpeg_quality", default=55)),

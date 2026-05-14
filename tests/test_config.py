@@ -133,6 +133,7 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.sim7600.restart_gnss_after_no_fix, 10)
         self.assertFalse(config.camera.enabled)
         self.assertEqual(config.camera.device, "/dev/video0")
+        self.assertEqual(config.camera.interval_seconds, 0)
         self.assertEqual(config.camera.rotation_degrees, 0)
         self.assertFalse(config.arduino_voltage.enabled)
         self.assertEqual(config.arduino_voltage.port, "/dev/ttyACM0")
