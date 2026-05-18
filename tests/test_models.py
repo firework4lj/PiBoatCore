@@ -1,3 +1,4 @@
+import csv
 import unittest
 
 from pi_boat_core.models import build_compact_heartbeat, build_heartbeat
@@ -64,6 +65,7 @@ class HeartbeatModelTests(unittest.TestCase):
                     "registration": {"registered": True},
                     "operator": {"name": "Dark Star"},
                     "network": {"system_mode": "LTE"},
+                    "track_points": [["2026-05-18T12:00:00Z", 45.1, -122.7, 2.4, 180.0]],
                     "gnss": {
                         "fix": True,
                         "latitude": 45.5,
@@ -87,7 +89,7 @@ class HeartbeatModelTests(unittest.TestCase):
             },
         )
 
-        fields = payload["t"].split(",")
+        fields = next(csv.reader([payload["t"]]))
         self.assertEqual(fields[0], "1")
         self.assertEqual(fields[1], "boat")
         self.assertEqual(fields[2], "pi")
@@ -101,6 +103,7 @@ class HeartbeatModelTests(unittest.TestCase):
         self.assertEqual(fields[24], "ok")
         self.assertEqual(fields[25], "moderate_activity")
         self.assertEqual(fields[28], "2")
+        self.assertEqual(fields[30], '[["2026-05-18T12:00:00Z",45.1,-122.7,2.4,180.0]]')
 
 
 if __name__ == "__main__":

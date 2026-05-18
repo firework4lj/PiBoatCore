@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 from datetime import UTC, datetime
 from typing import Any
 
@@ -82,6 +83,7 @@ def build_compact_heartbeat(
         audio.get("peak_db"),
         audio.get("impact_count_1m"),
         audio.get("peak_over_rms_db"),
+        _compact_json(modem.get("track_points")),
     ]
 
     return {"t": _to_csv_line(fields)}
@@ -98,3 +100,9 @@ def _bool_to_int(value: Any) -> int | None:
     if value is None:
         return None
     return 1 if bool(value) else 0
+
+
+def _compact_json(value: Any) -> str | None:
+    if not value:
+        return None
+    return json.dumps(value, separators=(",", ":"))
