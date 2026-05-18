@@ -1,6 +1,9 @@
 import unittest
 
+from pi_boat_core.config import AudioActivityConfig
 from pi_boat_core.sensors.audio_activity import (
+    AudioActivitySensor,
+    CLIP_COOLDOWN_SECONDS,
     analyze_pcm16,
     audio_event_trigger,
     amplitude_to_db,
@@ -11,6 +14,26 @@ from pi_boat_core.sensors.audio_activity import (
 
 
 class AudioActivityTests(unittest.TestCase):
+    def test_audio_sensor_enters_cooldown_after_burst(self) -> None:
+        sensor = AudioActivitySensor(test_audio_config())
+
+        sensor._record_event_time(100)
+        sensor._record_event_time(140)
+        sensor._record_event_time(180)
+
+        self.assertEqual(sensor._cooldown_until_monotonic, 180 + CLIP_COOLDOWN_SECONDS)
+        self.assertEqual(sensor._clips_recent_locked(180), 3)
+
+    def test_audio_sensor_suppression_clears_active_event(self) -> None:
+        sensor = AudioActivitySensor(test_audio_config())
+        sensor._active_event = {"trigger": "impact"}
+
+        sensor.set_clip_suppressed(True, "underway")
+
+        self.assertTrue(sensor._clip_suppressed)
+        self.assertEqual(sensor._clip_suppressed_reason, "underway")
+        self.assertIsNone(sensor._active_event)
+
     def test_amplitude_to_db_handles_silence_and_full_scale(self) -> None:
         self.assertEqual(amplitude_to_db(0), -120.0)
         self.assertAlmostEqual(amplitude_to_db(32767), 0.0, places=3)
@@ -145,6 +168,20 @@ class AudioActivityTests(unittest.TestCase):
             ),
             "impact_detected",
         )
+
+
+def test_audio_config() -> AudioActivityConfig:
+    return AudioActivityConfig(
+        enabled=True,
+        device="default",
+        sample_rate=16000,
+        chunk_seconds=0.5,
+        window_seconds=60,
+        impact_threshold_db=-4,
+        impact_min_peak_delta_db=20,
+        moderate_threshold_db=-32,
+        heavy_threshold_db=-18,
+    )
 
 
 if __name__ == "__main__":

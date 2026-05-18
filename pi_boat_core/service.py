@@ -24,6 +24,7 @@ from pi_boat_core.sensors import (
 from pi_boat_core.spool import TelemetrySpool
 
 LOGGER = logging.getLogger("piboatcore")
+UNDERWAY_SPEED_KNOTS = 1.0
 
 
 class BoatTelemetryService:
@@ -102,6 +103,7 @@ class BoatTelemetryService:
     async def tick(self) -> None:
         self.sequence += 1
         sensors = await self.collect_sensors()
+        self.apply_audio_clip_suppression(sensors)
         heartbeat = build_heartbeat(
             boat_id=self.config.boat_id,
             device_id=self.config.device_id,
@@ -113,6 +115,21 @@ class BoatTelemetryService:
         await self.flush_spool()
         await self.post_or_spool(payload)
         await self.post_audio_events()
+
+    def apply_audio_clip_suppression(self, sensors: dict[str, dict[str, Any]]) -> None:
+        speed_knots = current_speed_knots(sensors)
+        suppressed = isinstance(speed_knots, int | float) and speed_knots > UNDERWAY_SPEED_KNOTS
+        reason = "underway" if suppressed else None
+
+        for sensor in self.sensors:
+            set_clip_suppressed = getattr(sensor, "set_clip_suppressed", None)
+            if callable(set_clip_suppressed):
+                set_clip_suppressed(suppressed, reason)
+
+        audio = sensors.get("audio_activity")
+        if audio is not None:
+            audio["clip_suppressed"] = suppressed
+            audio["clip_suppressed_reason"] = reason
 
     def format_payload(self, heartbeat: dict[str, Any], sensors: dict[str, dict[str, Any]]) -> dict[str, Any]:
         if self.config.payload_format == "compact":
@@ -180,7 +197,7 @@ class BoatTelemetryService:
                 continue
             for event in pop_events():
                 try:
-                    await asyncio.to_thread(
+                    response = await asyncio.to_thread(
                         self.client.post_audio_event,
                         boat_id=self.config.boat_id,
                         device_id=self.config.device_id,
@@ -192,6 +209,7 @@ class BoatTelemetryService:
                         duration_seconds=event.get("duration_seconds"),
                         audio=event["wav"],
                     )
+                    await self.capture_and_post_audio_event_snapshot(response)
                     LOGGER.info("sent audio event trigger=%s bytes=%s", event.get("trigger"), len(event["wav"]))
                 except Exception as exc:
                     requeue_event = getattr(sensor, "requeue_audio_event", None)
@@ -199,6 +217,29 @@ class BoatTelemetryService:
                         requeue_event(event)
                     LOGGER.warning("audio event upload failed: %s", exc)
                     return
+
+    async def capture_and_post_audio_event_snapshot(self, response: dict[str, Any]) -> None:
+        if not self.config.camera.enabled:
+            return
+
+        event_id = response.get("audio_event", {}).get("event_id")
+        if not isinstance(event_id, str) or not event_id:
+            return
+
+        sent_at = utc_now_iso()
+        try:
+            image = await asyncio.to_thread(capture_snapshot, self.config.camera)
+            await asyncio.to_thread(
+                self.client.post_audio_event_snapshot,
+                boat_id=self.config.boat_id,
+                device_id=self.config.device_id,
+                event_id=event_id,
+                sent_at=sent_at,
+                image=image,
+            )
+            LOGGER.info("sent audio event snapshot event_id=%s bytes=%s", event_id, len(image))
+        except Exception as exc:
+            LOGGER.warning("audio event snapshot failed: %s", exc)
 
     async def _wait_for_camera_event(self) -> None:
         stop_task = asyncio.create_task(self._stop.wait())
@@ -297,6 +338,15 @@ def _parse_iso_epoch(value: Any) -> float | None:
         return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
     except ValueError:
         return None
+
+
+def current_speed_knots(sensors: dict[str, dict[str, Any]]) -> float | None:
+    sim_gnss = sensors.get("sim7600", {}).get("gnss", {})
+    gps = sensors.get("gps", {})
+    for speed in (sim_gnss.get("speed_knots"), gps.get("speed_knots")):
+        if isinstance(speed, int | float):
+            return float(speed)
+    return None
 
 
 async def async_main() -> None:

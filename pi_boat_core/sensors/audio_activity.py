@@ -15,6 +15,10 @@ from pi_boat_core.sensors.base import SensorAdapter
 
 LOGGER = logging.getLogger("piboatcore.audio")
 
+CLIP_BURST_LIMIT = 3
+CLIP_BURST_WINDOW_SECONDS = 120
+CLIP_COOLDOWN_SECONDS = 300
+
 
 class AudioActivitySensor(SensorAdapter):
     name = "audio_activity"
@@ -30,6 +34,10 @@ class AudioActivitySensor(SensorAdapter):
         self._last_sample_monotonic: float | None = None
         self._logged_first_sample = False
         self._active_event: dict[str, Any] | None = None
+        self._event_monotonic_times: deque[float] = deque()
+        self._cooldown_until_monotonic = 0.0
+        self._clip_suppressed = False
+        self._clip_suppressed_reason: str | None = None
 
     async def read(self) -> dict[str, Any]:
         self._ensure_started()
@@ -37,6 +45,10 @@ class AudioActivitySensor(SensorAdapter):
             samples = list(self._samples)
             last_error = self._last_error
             last_sample_monotonic = self._last_sample_monotonic
+            cooldown_until = self._cooldown_until_monotonic
+            clip_suppressed = self._clip_suppressed
+            clip_suppressed_reason = self._clip_suppressed_reason
+            clips_recent = self._clips_recent_locked(time.monotonic())
 
         if not samples:
             return {
@@ -83,10 +95,22 @@ class AudioActivitySensor(SensorAdapter):
             "peak_db": round(peak_db, 1),
             "peak_over_rms_db": round(peak_db - avg_rms_db, 1),
             "impact_count_1m": impact_count,
+            "clip_cooldown": now < cooldown_until,
+            "clip_cooldown_remaining_seconds": max(0, round(cooldown_until - now)),
+            "clip_suppressed": clip_suppressed,
+            "clip_suppressed_reason": clip_suppressed_reason,
+            "clips_recent": clips_recent,
             "samples": len(recent),
             "last_sample_age_seconds": age,
             "error": last_error,
         }
+
+    def set_clip_suppressed(self, suppressed: bool, reason: str | None = None) -> None:
+        with self._lock:
+            self._clip_suppressed = suppressed
+            self._clip_suppressed_reason = reason if suppressed else None
+            if suppressed:
+                self._active_event = None
 
     def pop_audio_events(self, limit: int = 3) -> list[dict[str, Any]]:
         with self._lock:
@@ -177,6 +201,10 @@ class AudioActivitySensor(SensorAdapter):
             self._finish_audio_event(self._active_event)
             self._active_event = None
 
+        if self._clip_suppressed or now < self._cooldown_until_monotonic:
+            self._active_event = None
+            return
+
         if self._active_event:
             return
 
@@ -220,8 +248,23 @@ class AudioActivitySensor(SensorAdapter):
                 "wav": wav,
             }
         )
+        self._record_event_time(event["trigger_monotonic"])
         while len(self._audio_events) > 20:
             self._audio_events.popleft()
+
+    def _record_event_time(self, monotonic_time: float) -> None:
+        self._event_monotonic_times.append(monotonic_time)
+        self._clips_recent_locked(monotonic_time)
+        if len(self._event_monotonic_times) >= CLIP_BURST_LIMIT:
+            self._cooldown_until_monotonic = monotonic_time + CLIP_COOLDOWN_SECONDS
+            self._active_event = None
+            LOGGER.info("audio event clip cooldown started for %ss", CLIP_COOLDOWN_SECONDS)
+
+    def _clips_recent_locked(self, now: float) -> int:
+        cutoff = now - CLIP_BURST_WINDOW_SECONDS
+        while self._event_monotonic_times and self._event_monotonic_times[0] < cutoff:
+            self._event_monotonic_times.popleft()
+        return len(self._event_monotonic_times)
 
 
 def analyze_pcm16(chunk: bytes) -> tuple[float, int]:
