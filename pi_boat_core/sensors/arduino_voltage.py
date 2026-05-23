@@ -9,6 +9,16 @@ from typing import Any
 from pi_boat_core.config import ArduinoVoltageConfig
 from pi_boat_core.sensors.base import SensorAdapter
 
+ADC_REFERENCE_VOLTS = 5.0
+ADC_MAX_RAW = 1023.0
+VOLTAGE_DIVIDER_RATIO = 5.0
+VOLTAGE_CALIBRATION_MULTIPLIER = 1.0
+MAP_MIN_VOLTS = 0.50
+MAP_MAX_VOLTS = 4.50
+MAP_MIN_KPA = 10.0
+MAP_MAX_KPA = 105.0
+SPARKS_PER_REVOLUTION = 0.5
+
 
 class ArduinoVoltageError(RuntimeError):
     pass
@@ -203,6 +213,9 @@ def parse_voltage_line(line: str) -> dict[str, Any]:
     except json.JSONDecodeError as exc:
         raise ArduinoVoltageError(f"invalid voltage JSON: {line}") from exc
 
+    if payload.get("type") == "engine_raw":
+        return parse_engine_raw_payload(payload)
+
     if payload.get("type") != "battery_voltage":
         raise ArduinoVoltageError(f"unexpected voltage payload type: {payload.get('type')}")
 
@@ -228,6 +241,36 @@ def parse_voltage_line(line: str) -> dict[str, Any]:
     }
 
 
+def parse_engine_raw_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    voltage_raw = _required_number(payload, "voltage_raw")
+    map_raw = _required_number(payload, "map_raw")
+    tach_pulses = _required_number(payload, "tach_pulses")
+    interval_ms = _required_number(payload, "interval_ms")
+
+    voltage_sensor_volts = adc_to_volts(voltage_raw)
+    voltage = voltage_sensor_volts * VOLTAGE_DIVIDER_RATIO * VOLTAGE_CALIBRATION_MULTIPLIER
+    map_voltage = adc_to_volts(map_raw)
+    map_kpa = estimate_map_kpa(map_voltage)
+    rpm = estimate_rpm(tach_pulses, interval_ms)
+
+    return {
+        "pin": payload.get("voltage_pin"),
+        "voltage_raw": int(voltage_raw),
+        "voltage": voltage,
+        "charging": voltage >= 13.2,
+        "soc_estimate_percent": estimate_lead_acid_soc(voltage),
+        "map_pin": payload.get("map_pin"),
+        "map_raw": int(map_raw),
+        "map_voltage": map_voltage,
+        "map_kpa": map_kpa,
+        "map_load_percent": estimate_map_load_percent(map_kpa),
+        "tach_pin": payload.get("tach_pin"),
+        "tach_pulses": int(tach_pulses),
+        "tach_interval_ms": float(interval_ms),
+        "rpm": rpm,
+    }
+
+
 def heartbeat_voltage_fields(payload: dict[str, Any]) -> dict[str, Any]:
     return {
         "pin": payload.get("pin"),
@@ -235,6 +278,59 @@ def heartbeat_voltage_fields(payload: dict[str, Any]) -> dict[str, Any]:
         "charging": payload.get("charging"),
         "soc_estimate_percent": payload.get("soc_estimate_percent"),
     }
+
+
+def adc_to_volts(raw: float) -> float:
+    return raw * (ADC_REFERENCE_VOLTS / ADC_MAX_RAW)
+
+
+def estimate_map_kpa(volts: float) -> float:
+    constrained_volts = min(MAP_MAX_VOLTS, max(MAP_MIN_VOLTS, volts))
+    ratio = (constrained_volts - MAP_MIN_VOLTS) / (MAP_MAX_VOLTS - MAP_MIN_VOLTS)
+    return MAP_MIN_KPA + (ratio * (MAP_MAX_KPA - MAP_MIN_KPA))
+
+
+def estimate_map_load_percent(map_kpa: float) -> float:
+    ratio = (map_kpa - MAP_MIN_KPA) / (MAP_MAX_KPA - MAP_MIN_KPA)
+    return min(100.0, max(0.0, ratio * 100.0))
+
+
+def estimate_rpm(pulse_count: float, interval_ms: float) -> float:
+    if interval_ms <= 0 or SPARKS_PER_REVOLUTION <= 0:
+        return 0.0
+    pulses_per_second = pulse_count * (1000.0 / interval_ms)
+    return (pulses_per_second * 60.0) / SPARKS_PER_REVOLUTION
+
+
+def estimate_lead_acid_soc(voltage: float) -> int:
+    if voltage >= 12.70:
+        return 100
+    if voltage >= 12.50:
+        return 90
+    if voltage >= 12.42:
+        return 80
+    if voltage >= 12.32:
+        return 70
+    if voltage >= 12.20:
+        return 60
+    if voltage >= 12.06:
+        return 50
+    if voltage >= 11.90:
+        return 40
+    if voltage >= 11.75:
+        return 30
+    if voltage >= 11.58:
+        return 20
+    if voltage >= 11.31:
+        return 10
+    return 0
+
+
+def _required_number(payload: dict[str, Any], field: str) -> float:
+    value = payload.get(field)
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise ArduinoVoltageError(f"{field} must be numeric")
+    return float(value)
 
 
 def _optional_string_fields(payload: dict[str, Any], fields: list[str]) -> dict[str, str]:

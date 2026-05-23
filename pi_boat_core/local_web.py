@@ -336,7 +336,7 @@ ENGINE_PAGE = """<!doctype html>
       }
 
       refresh();
-      setInterval(refresh, 500);
+      setInterval(refresh, 50);
     </script>
   </body>
 </html>
