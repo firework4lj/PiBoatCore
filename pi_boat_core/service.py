@@ -10,6 +10,7 @@ from typing import Any
 from pi_boat_core.camera import capture_snapshot
 from pi_boat_core.client import TelemetryClient, TelemetryPostError
 from pi_boat_core.config import Config
+from pi_boat_core.local_web import LocalWebServer
 from pi_boat_core.models import build_compact_heartbeat, build_heartbeat, utc_now_iso
 from pi_boat_core.sensors import (
     ArduinoVoltageSensor,
@@ -54,14 +55,26 @@ class BoatTelemetryService:
     async def run(self) -> None:
         LOGGER.info("starting telemetry service for boat_id=%s", self.config.boat_id)
         tasks = [asyncio.create_task(self.run_heartbeats())]
+        tasks.extend(
+            asyncio.create_task(runner(self._stop))
+            for sensor in self.sensors
+            if callable(runner := getattr(sensor, "run_until_stopped", None))
+        )
         if self.config.camera.enabled:
             tasks.append(asyncio.create_task(self.run_camera()))
+        if self.config.local_web.enabled:
+            LOGGER.info("starting local web interface on http://%s:%s", self.config.local_web.host, self.config.local_web.port)
+            tasks.append(asyncio.create_task(self.run_local_web()))
 
         try:
             await asyncio.gather(*tasks)
         finally:
             for task in tasks:
                 task.cancel()
+
+    async def run_local_web(self) -> None:
+        server = LocalWebServer(self.config.local_web, self.latest_engine_payload)
+        await server.run_until_stopped(self._stop)
 
     async def run_heartbeats(self) -> None:
         while not self._stop.is_set():
@@ -153,6 +166,13 @@ class BoatTelemetryService:
         except Exception as exc:
             LOGGER.exception("sensor read failed: %s", sensor.name)
             return sensor.name, {"status": "error", "error": str(exc)}
+
+    def latest_engine_payload(self) -> dict[str, Any]:
+        for sensor in self.sensors:
+            latest_engine_payload = getattr(sensor, "latest_engine_payload", None)
+            if callable(latest_engine_payload):
+                return latest_engine_payload()
+        return {"status": "disabled", "error": "arduino voltage sensor is not enabled"}
 
     async def flush_spool(self) -> None:
         for item in self.spool.pending():

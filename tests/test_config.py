@@ -59,6 +59,11 @@ class ConfigTests(unittest.TestCase):
                 max_attempts = 3
                 retry_delay_seconds = 0.5
 
+                [local_web]
+                enabled = true
+                host = "127.0.0.1"
+                port = 18080
+
                 [audio_activity]
                 enabled = true
                 device = "plughw:1,0"
@@ -104,6 +109,9 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.arduino_voltage.port, "/dev/ttyACM1")
         self.assertEqual(config.arduino_voltage.baudrate, 9600)
         self.assertEqual(config.arduino_voltage.timeout_seconds, 4)
+        self.assertTrue(config.local_web.enabled)
+        self.assertEqual(config.local_web.host, "127.0.0.1")
+        self.assertEqual(config.local_web.port, 18080)
         self.assertTrue(config.audio_activity.enabled)
         self.assertEqual(config.audio_activity.device, "plughw:1,0")
         self.assertEqual(config.audio_activity.sample_rate, 8000)
@@ -138,6 +146,9 @@ class ConfigTests(unittest.TestCase):
         self.assertFalse(config.arduino_voltage.enabled)
         self.assertEqual(config.arduino_voltage.port, "/dev/ttyACM0")
         self.assertEqual(config.arduino_voltage.timeout_seconds, 5)
+        self.assertFalse(config.local_web.enabled)
+        self.assertEqual(config.local_web.host, "0.0.0.0")
+        self.assertEqual(config.local_web.port, 8080)
         self.assertFalse(config.audio_activity.enabled)
         self.assertEqual(config.audio_activity.device, "default")
         self.assertEqual(config.audio_activity.sample_rate, 16000)

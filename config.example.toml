@@ -46,6 +46,11 @@ timeout_seconds = 5
 max_attempts = 2
 retry_delay_seconds = 1
 
+[local_web]
+enabled = false
+host = "0.0.0.0"
+port = 8080
+
 [audio_activity]
 enabled = false
 device = "default"

@@ -48,6 +48,13 @@ class ArduinoVoltageConfig:
 
 
 @dataclass(frozen=True)
+class LocalWebConfig:
+    enabled: bool
+    host: str
+    port: int
+
+
+@dataclass(frozen=True)
 class AudioActivityConfig:
     enabled: bool
     device: str
@@ -74,6 +81,7 @@ class Config:
     sim7600: Sim7600Config
     camera: CameraConfig
     arduino_voltage: ArduinoVoltageConfig
+    local_web: LocalWebConfig
     audio_activity: AudioActivityConfig
 
     @classmethod
@@ -119,6 +127,11 @@ class Config:
                 timeout_seconds=float(_get(data, "arduino_voltage", "timeout_seconds", default=5)),
                 max_attempts=int(_get(data, "arduino_voltage", "max_attempts", default=2)),
                 retry_delay_seconds=float(_get(data, "arduino_voltage", "retry_delay_seconds", default=1)),
+            ),
+            local_web=LocalWebConfig(
+                enabled=bool(_get(data, "local_web", "enabled", default=False)),
+                host=_get(data, "local_web", "host", default="0.0.0.0"),
+                port=int(_get(data, "local_web", "port", default=8080)),
             ),
             audio_activity=AudioActivityConfig(
                 enabled=bool(_get(data, "audio_activity", "enabled", default=False)),
