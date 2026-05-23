@@ -4,6 +4,7 @@ import asyncio
 import json
 import threading
 import time
+from collections import deque
 from typing import Any
 
 from pi_boat_core.config import ArduinoVoltageConfig
@@ -18,6 +19,7 @@ MAP_MAX_VOLTS = 4.50
 MAP_MIN_KPA = 10.0
 MAP_MAX_KPA = 105.0
 SPARKS_PER_REVOLUTION = 0.5
+RPM_WINDOW_SECONDS = 1.0
 
 
 class ArduinoVoltageError(RuntimeError):
@@ -35,6 +37,7 @@ class ArduinoVoltageSensor(SensorAdapter):
         self._last_error: str | None = None
         self._streaming = False
         self._stream_stop = threading.Event()
+        self._tach_samples: deque[tuple[float, int, float]] = deque()
 
     async def read(self) -> dict[str, Any]:
         if self._streaming:
@@ -164,10 +167,29 @@ class ArduinoVoltageSensor(SensorAdapter):
                 except ArduinoVoltageError:
                     continue
 
+                sampled_at = time.monotonic()
+                self._apply_rolling_rpm(payload, sampled_at)
                 self._consecutive_failures = 0
                 self._last_error = None
-                self._last_success_monotonic = time.monotonic()
+                self._last_success_monotonic = sampled_at
                 self._last_success_payload = payload
+
+    def _apply_rolling_rpm(self, payload: dict[str, Any], sampled_at: float) -> None:
+        tach_pulses = payload.get("tach_pulses")
+        interval_ms = payload.get("tach_interval_ms")
+        if not isinstance(tach_pulses, int | float) or not isinstance(interval_ms, int | float):
+            return
+
+        self._tach_samples.append((sampled_at, int(tach_pulses), float(interval_ms)))
+        cutoff = sampled_at - RPM_WINDOW_SECONDS
+        while self._tach_samples and self._tach_samples[0][0] < cutoff:
+            self._tach_samples.popleft()
+
+        total_pulses = sum(sample[1] for sample in self._tach_samples)
+        total_interval_ms = sum(sample[2] for sample in self._tach_samples)
+        payload["rpm_instant"] = payload.get("rpm")
+        payload["rpm"] = estimate_rpm(total_pulses, total_interval_ms)
+        payload["rpm_window_seconds"] = round(total_interval_ms / 1000.0, 3)
 
     def _heartbeat_payload(self) -> dict[str, Any]:
         if self._last_success_payload is None:

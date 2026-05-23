@@ -1,5 +1,7 @@
 import unittest
 
+from pi_boat_core.config import ArduinoVoltageConfig
+from pi_boat_core.sensors.arduino_voltage import ArduinoVoltageSensor
 from pi_boat_core.sensors.arduino_voltage import ArduinoVoltageError, heartbeat_voltage_fields, parse_voltage_line
 
 
@@ -47,3 +49,26 @@ class ArduinoVoltageParserTests(unittest.TestCase):
     def test_parse_voltage_line_rejects_invalid_payload(self) -> None:
         with self.assertRaises(ArduinoVoltageError):
             parse_voltage_line('{"type":"other","voltage":12.0}')
+
+    def test_rolling_rpm_uses_one_second_window(self) -> None:
+        sensor = ArduinoVoltageSensor(
+            ArduinoVoltageConfig(
+                enabled=True,
+                port="/dev/null",
+                baudrate=115200,
+                timeout_seconds=1,
+                max_attempts=1,
+                retry_delay_seconds=0.1,
+            )
+        )
+        for index in range(20):
+            pulses = 1 if index % 4 == 0 else 0
+            payload = parse_voltage_line(
+                '{"type":"engine_raw","voltage_pin":"A0","voltage_raw":518,'
+                f'"map_pin":"A1","map_raw":412,"tach_pin":"D2","tach_pulses":{pulses},"interval_ms":50}}'
+            )
+            sensor._apply_rolling_rpm(payload, 100.0 + (index * 0.05))
+
+        self.assertEqual(payload["rpm_instant"], 0.0)
+        self.assertEqual(payload["rpm"], 600.0)
+        self.assertAlmostEqual(payload["rpm_window_seconds"], 1.0)
