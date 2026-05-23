@@ -88,7 +88,7 @@ ENGINE_PAGE = """<!doctype html>
     <title>PiBoat Engine</title>
     <style>
       :root { color-scheme: dark; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-      body { margin: 0; min-height: 100vh; background: #071014; color: #eef7f5; }
+      body { margin: 0; min-height: 100vh; background: #061015; color: #eef7f5; }
       main { box-sizing: border-box; min-height: 100vh; padding: 18px; display: grid; gap: 14px; }
       header { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
       h1 { margin: 0; font-size: 22px; font-weight: 700; }
@@ -96,10 +96,71 @@ ENGINE_PAGE = """<!doctype html>
       #status { color: #9fb2ae; font-size: 14px; }
       .gauges { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; align-content: center; }
       .gauge, .panel { border: 1px solid #214044; background: #0b1a1f; border-radius: 8px; padding: 14px; }
-      .gauge { min-height: 96px; display: grid; align-content: center; }
-      .label { color: #8da4a2; font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; }
-      .value { font-size: clamp(30px, 7vw, 62px); line-height: 1; font-weight: 800; font-variant-numeric: tabular-nums; }
-      .unit { color: #9fb2ae; font-size: 16px; margin-left: 6px; }
+      .gauge { min-height: 208px; display: grid; place-items: center; }
+      .dial {
+        --value: 0;
+        --needle: -120deg;
+        --accent: #54d6a5;
+        position: relative;
+        width: min(100%, 220px);
+        aspect-ratio: 1;
+        border-radius: 50%;
+        background:
+          radial-gradient(circle at center, #0b1a1f 0 49%, transparent 50%),
+          conic-gradient(from 220deg, var(--accent) calc(var(--value) * 0.72deg), #1e373b 0 260deg, transparent 260deg);
+        box-shadow: inset 0 0 0 1px #2a4d52, inset 0 0 22px #0008;
+      }
+      .dial::before {
+        content: "";
+        position: absolute;
+        inset: 11%;
+        border-radius: 50%;
+        background: #071014;
+        box-shadow: inset 0 0 0 1px #173036;
+      }
+      .needle {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: 3px;
+        height: 35%;
+        background: #eef7f5;
+        border-radius: 99px;
+        transform-origin: 50% 92%;
+        transform: translate(-50%, -92%) rotate(var(--needle));
+        box-shadow: 0 0 10px #000;
+      }
+      .hub {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        background: var(--accent);
+        transform: translate(-50%, -50%);
+        box-shadow: 0 0 0 4px #071014;
+      }
+      .readout {
+        position: absolute;
+        inset: 25% 14% 15%;
+        display: grid;
+        place-items: center;
+        text-align: center;
+      }
+      .label { color: #8da4a2; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; }
+      .value { display: block; margin-top: 32px; font-size: clamp(30px, 5vw, 48px); line-height: 1; font-weight: 800; font-variant-numeric: tabular-nums; }
+      .unit { display: block; margin-top: 4px; color: #9fb2ae; font-size: 13px; }
+      .ticks {
+        position: absolute;
+        left: 12%;
+        right: 12%;
+        bottom: 13%;
+        display: flex;
+        justify-content: space-between;
+        color: #708681;
+        font-size: 11px;
+      }
       .charts { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(280px, 0.7fr); gap: 10px; }
       .chart-stack { display: grid; gap: 10px; }
       .panel header { margin-bottom: 10px; }
@@ -127,20 +188,32 @@ ENGINE_PAGE = """<!doctype html>
       </header>
       <section class="gauges">
         <div class="gauge">
-          <span class="label">RPM</span>
-          <div><span class="value" id="rpm">--</span><span class="unit">rpm</span></div>
+          <div class="dial" id="rpmDial" style="--accent:#54d6a5">
+            <div class="needle"></div><div class="hub"></div>
+            <div class="readout"><div><span class="label">RPM</span><span class="value" id="rpm">--</span><span class="unit">rpm</span></div></div>
+            <div class="ticks"><span>0</span><span>4k</span></div>
+          </div>
         </div>
         <div class="gauge">
-          <span class="label">MAP</span>
-          <div><span class="value" id="map">--</span><span class="unit">kPa</span></div>
+          <div class="dial" id="mapDial" style="--accent:#f4c15d">
+            <div class="needle"></div><div class="hub"></div>
+            <div class="readout"><div><span class="label">MAP</span><span class="value" id="map">--</span><span class="unit">kPa</span></div></div>
+            <div class="ticks"><span>0</span><span>110</span></div>
+          </div>
         </div>
         <div class="gauge">
-          <span class="label">Load</span>
-          <div><span class="value" id="load">--</span><span class="unit">%</span></div>
+          <div class="dial" id="loadDial" style="--accent:#66a8ff">
+            <div class="needle"></div><div class="hub"></div>
+            <div class="readout"><div><span class="label">Load</span><span class="value" id="load">--</span><span class="unit">%</span></div></div>
+            <div class="ticks"><span>0</span><span>100</span></div>
+          </div>
         </div>
         <div class="gauge">
-          <span class="label">Battery</span>
-          <div><span class="value" id="voltage">--</span><span class="unit">V</span></div>
+          <div class="dial" id="voltageDial" style="--accent:#e97b68">
+            <div class="needle"></div><div class="hub"></div>
+            <div class="readout"><div><span class="label">Battery</span><span class="value" id="voltage">--</span><span class="unit">V</span></div></div>
+            <div class="ticks"><span>11</span><span>15</span></div>
+          </div>
         </div>
       </section>
       <section class="charts">
@@ -190,6 +263,10 @@ ENGINE_PAGE = """<!doctype html>
         map: document.querySelector("#map"),
         load: document.querySelector("#load"),
         voltage: document.querySelector("#voltage"),
+        rpmDial: document.querySelector("#rpmDial"),
+        mapDial: document.querySelector("#mapDial"),
+        loadDial: document.querySelector("#loadDial"),
+        voltageDial: document.querySelector("#voltageDial"),
         mapState: document.querySelector("#mapState"),
         engineState: document.querySelector("#engineState"),
         idleQuality: document.querySelector("#idleQuality"),
@@ -217,6 +294,10 @@ ENGINE_PAGE = """<!doctype html>
           els.map.textContent = Number.isFinite(sample.mapKpaAvg) ? sample.mapKpaAvg.toFixed(1) : "--";
           els.load.textContent = Number.isFinite(sample.loadPercent) ? sample.loadPercent.toFixed(0) : "--";
           els.voltage.textContent = Number.isFinite(sample.voltage) ? sample.voltage.toFixed(2) : "--";
+          updateGauge(els.rpmDial, sample.rpm, 0, 4000);
+          updateGauge(els.mapDial, sample.mapKpaAvg, 0, 110);
+          updateGauge(els.loadDial, sample.loadPercent, 0, 100);
+          updateGauge(els.voltageDial, sample.voltage, 11, 15);
           els.mapState.textContent = describeMapState(sample);
           renderAnalysis(data);
           els.detail.textContent = JSON.stringify(data, null, 2);
@@ -235,6 +316,12 @@ ENGINE_PAGE = """<!doctype html>
         if (data.bog_detected) warnings.push("Bog");
         if (data.stall_risk) warnings.push("Stall risk");
         els.engineWarnings.textContent = warnings.join(" / ") || "None";
+      }
+
+      function updateGauge(element, value, min, max) {
+        const ratio = Number.isFinite(value) ? clamp((value - min) / (max - min), 0, 1) : 0;
+        element.style.setProperty("--value", (ratio * 100).toFixed(2));
+        element.style.setProperty("--needle", `${-120 + (ratio * 240)}deg`);
       }
 
       function normalizeSample(data) {
