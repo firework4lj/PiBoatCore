@@ -96,12 +96,12 @@ ENGINE_PAGE = """<!doctype html>
       #status { color: #9fb2ae; font-size: 14px; }
       .gauges { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; align-content: center; }
       .gauge, .panel { border: 1px solid #214044; background: #0b1a1f; border-radius: 8px; padding: 14px; }
-      .gauge { min-height: 196px; padding: 10px; }
+      .gauge { min-height: 178px; padding: 10px; }
       .charts { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(280px, 0.7fr); gap: 10px; }
       .chart-stack { display: grid; gap: 10px; }
       .panel header { margin-bottom: 10px; }
       canvas { display: block; width: 100%; height: 210px; background: #071014; border-radius: 6px; }
-      .gauge-canvas { height: 190px; background: transparent; }
+      .gauge-canvas { height: 172px; background: transparent; }
       .small canvas { height: 132px; }
       .legend { display: flex; flex-wrap: wrap; gap: 10px; color: #9fb2ae; font-size: 13px; }
       .legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; background: var(--color); }
@@ -246,18 +246,19 @@ ENGINE_PAGE = """<!doctype html>
         const width = bounds.width;
         const height = bounds.height;
         const centerX = width / 2;
-        const centerY = height * 0.62;
-        const radius = Math.min(width * 0.38, height * 0.48);
-        const start = degreesToRadians(210);
-        const end = degreesToRadians(330);
+        const centerY = height * 0.82;
+        const radius = Math.min(width * 0.42, height * 0.70);
+        const start = degreesToRadians(155);
+        const sweep = degreesToRadians(230);
+        const end = start + sweep;
         const ratio = Number.isFinite(options.value)
           ? clamp((options.value - options.min) / (options.max - options.min), 0, 1)
           : 0;
-        const angle = start + (degreesToRadians(240) * ratio);
+        const angle = start + (sweep * ratio);
 
         ctx.clearRect(0, 0, width, height);
         ctx.lineCap = "round";
-        ctx.lineWidth = 12;
+        ctx.lineWidth = 10;
         ctx.strokeStyle = "#20393d";
         ctx.beginPath();
         ctx.arc(centerX, centerY, radius, start, end);
@@ -272,7 +273,7 @@ ENGINE_PAGE = """<!doctype html>
 
         for (let index = 0; index <= 8; index += 1) {
           const tickRatio = index / 8;
-          const tickAngle = start + (degreesToRadians(240) * tickRatio);
+          const tickAngle = start + (sweep * tickRatio);
           const outer = radius + 2;
           const inner = radius - (index % 2 === 0 ? 12 : 7);
           ctx.strokeStyle = index % 2 === 0 ? "#557073" : "#345055";
@@ -283,7 +284,7 @@ ENGINE_PAGE = """<!doctype html>
           ctx.stroke();
         }
 
-        const needleLength = radius - 20;
+        const needleLength = radius - 28;
         ctx.strokeStyle = "#eef7f5";
         ctx.lineWidth = 3;
         ctx.beginPath();
@@ -295,24 +296,49 @@ ENGINE_PAGE = """<!doctype html>
         ctx.arc(centerX, centerY, 7, 0, Math.PI * 2);
         ctx.fill();
 
+        const plateWidth = Math.min(150, width * 0.58);
+        const plateHeight = 70;
+        const plateX = centerX - plateWidth / 2;
+        const plateY = centerY - radius * 0.43;
+        ctx.fillStyle = "#071014";
+        roundRect(ctx, plateX, plateY, plateWidth, plateHeight, 8);
+        ctx.fill();
+        ctx.strokeStyle = "#173036";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
         ctx.textAlign = "center";
         ctx.fillStyle = "#8da4a2";
         ctx.font = "12px system-ui";
-        ctx.fillText(options.label, centerX, centerY - radius * 0.58);
+        ctx.fillText(options.label, centerX, plateY + 17);
         ctx.fillStyle = "#eef7f5";
-        ctx.font = "700 34px system-ui";
+        ctx.font = "700 32px system-ui";
         const valueText = Number.isFinite(options.value) ? options.value.toFixed(options.decimals) : "--";
-        ctx.fillText(valueText, centerX, centerY - 8);
+        ctx.fillText(valueText, centerX, plateY + 48);
         ctx.fillStyle = "#9fb2ae";
         ctx.font = "13px system-ui";
-        ctx.fillText(options.unit, centerX, centerY + 16);
+        ctx.fillText(options.unit, centerX, plateY + 64);
         ctx.font = "12px system-ui";
-        ctx.fillText(options.minLabel, centerX - radius * 0.82, centerY + radius * 0.54);
-        ctx.fillText(options.maxLabel, centerX + radius * 0.82, centerY + radius * 0.54);
+        ctx.fillText(options.minLabel, centerX + Math.cos(start) * (radius - 7), centerY + Math.sin(start) * (radius - 7) + 16);
+        ctx.fillText(options.maxLabel, centerX + Math.cos(end) * (radius - 7), centerY + Math.sin(end) * (radius - 7) + 16);
       }
 
       function degreesToRadians(degrees) {
         return degrees * Math.PI / 180;
+      }
+
+      function roundRect(ctx, x, y, width, height, radius) {
+        ctx.beginPath();
+        ctx.moveTo(x + radius, y);
+        ctx.lineTo(x + width - radius, y);
+        ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+        ctx.lineTo(x + width, y + height - radius);
+        ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+        ctx.lineTo(x + radius, y + height);
+        ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+        ctx.lineTo(x, y + radius);
+        ctx.quadraticCurveTo(x, y, x + radius, y);
+        ctx.closePath();
       }
 
       function normalizeSample(data) {
