@@ -94,14 +94,19 @@ ENGINE_PAGE = """<!doctype html>
       h1 { margin: 0; font-size: 22px; font-weight: 700; }
       h2 { margin: 0; font-size: 16px; }
       #status { color: #9fb2ae; font-size: 14px; }
-      .gauges { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; align-content: center; }
-      .gauge, .panel { border: 1px solid #214044; background: #0b1a1f; border-radius: 8px; padding: 14px; }
-      .gauge { min-height: 178px; padding: 10px; }
+      .metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; align-content: center; }
+      .metric, .panel { border: 1px solid #214044; background: #0b1a1f; border-radius: 8px; padding: 14px; }
+      .metric { display: grid; gap: 12px; min-height: 112px; }
+      .metric-label { color: #8da4a2; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; }
+      .metric-value { font-size: clamp(34px, 5vw, 58px); line-height: 1; font-weight: 800; font-variant-numeric: tabular-nums; }
+      .metric-unit { color: #9fb2ae; font-size: 15px; margin-left: 6px; font-weight: 500; }
+      .bar { height: 9px; border-radius: 99px; background: #173036; overflow: hidden; }
+      .bar-fill { width: 0%; height: 100%; border-radius: inherit; background: var(--color); transition: width 120ms linear; }
+      .metric-range { display: flex; justify-content: space-between; color: #708681; font-size: 12px; }
       .charts { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(280px, 0.7fr); gap: 10px; }
       .chart-stack { display: grid; gap: 10px; }
       .panel header { margin-bottom: 10px; }
       canvas { display: block; width: 100%; height: 210px; background: #071014; border-radius: 6px; }
-      .gauge-canvas { height: 172px; background: transparent; }
       .small canvas { height: 132px; }
       .legend { display: flex; flex-wrap: wrap; gap: 10px; color: #9fb2ae; font-size: 13px; }
       .legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; background: var(--color); }
@@ -113,8 +118,8 @@ ENGINE_PAGE = """<!doctype html>
       .analysis strong { font-size: 20px; }
       .analysis p { margin: 0; color: #9fb2ae; line-height: 1.35; }
       pre { margin: 0; color: #9fb2ae; white-space: pre-wrap; font-size: 12px; }
-      @media (max-width: 900px) { .gauges, .charts, .analysis-grid { grid-template-columns: 1fr 1fr; } .chart-stack { grid-column: 1 / -1; } }
-      @media (max-width: 640px) { main { padding: 12px; } .gauges, .charts, .analysis-grid { grid-template-columns: 1fr; } canvas { height: 180px; } }
+      @media (max-width: 900px) { .metrics, .charts, .analysis-grid { grid-template-columns: 1fr 1fr; } .chart-stack { grid-column: 1 / -1; } }
+      @media (max-width: 640px) { main { padding: 12px; } .metrics, .charts, .analysis-grid { grid-template-columns: 1fr; } canvas { height: 180px; } }
     </style>
   </head>
   <body>
@@ -123,18 +128,30 @@ ENGINE_PAGE = """<!doctype html>
         <h1>Engine</h1>
         <span id="status">Connecting</span>
       </header>
-      <section class="gauges">
-        <div class="gauge">
-          <canvas class="gauge-canvas" id="rpmGauge" width="320" height="220"></canvas>
+      <section class="metrics">
+        <div class="metric">
+          <span class="metric-label">RPM</span>
+          <div><span class="metric-value" id="rpmValue">--</span><span class="metric-unit">rpm</span></div>
+          <div class="bar"><div class="bar-fill" id="rpmBar" style="--color:#54d6a5"></div></div>
+          <div class="metric-range"><span>0</span><span>4000</span></div>
         </div>
-        <div class="gauge">
-          <canvas class="gauge-canvas" id="mapGauge" width="320" height="220"></canvas>
+        <div class="metric">
+          <span class="metric-label">MAP</span>
+          <div><span class="metric-value" id="mapValue">--</span><span class="metric-unit">kPa</span></div>
+          <div class="bar"><div class="bar-fill" id="mapBar" style="--color:#f4c15d"></div></div>
+          <div class="metric-range"><span>0</span><span>110</span></div>
         </div>
-        <div class="gauge">
-          <canvas class="gauge-canvas" id="loadGauge" width="320" height="220"></canvas>
+        <div class="metric">
+          <span class="metric-label">Load</span>
+          <div><span class="metric-value" id="loadValue">--</span><span class="metric-unit">%</span></div>
+          <div class="bar"><div class="bar-fill" id="loadBar" style="--color:#66a8ff"></div></div>
+          <div class="metric-range"><span>0</span><span>100</span></div>
         </div>
-        <div class="gauge">
-          <canvas class="gauge-canvas" id="voltageGauge" width="320" height="220"></canvas>
+        <div class="metric">
+          <span class="metric-label">Battery</span>
+          <div><span class="metric-value" id="voltageValue">--</span><span class="metric-unit">V</span></div>
+          <div class="bar"><div class="bar-fill" id="voltageBar" style="--color:#e97b68"></div></div>
+          <div class="metric-range"><span>11</span><span>15</span></div>
         </div>
       </section>
       <section class="charts">
@@ -180,10 +197,14 @@ ENGINE_PAGE = """<!doctype html>
       const MAP_LOAD_WOT_KPA = 100;
       const els = {
         status: document.querySelector("#status"),
-        rpmGauge: document.querySelector("#rpmGauge"),
-        mapGauge: document.querySelector("#mapGauge"),
-        loadGauge: document.querySelector("#loadGauge"),
-        voltageGauge: document.querySelector("#voltageGauge"),
+        rpmValue: document.querySelector("#rpmValue"),
+        mapValue: document.querySelector("#mapValue"),
+        loadValue: document.querySelector("#loadValue"),
+        voltageValue: document.querySelector("#voltageValue"),
+        rpmBar: document.querySelector("#rpmBar"),
+        mapBar: document.querySelector("#mapBar"),
+        loadBar: document.querySelector("#loadBar"),
+        voltageBar: document.querySelector("#voltageBar"),
         mapState: document.querySelector("#mapState"),
         engineState: document.querySelector("#engineState"),
         idleQuality: document.querySelector("#idleQuality"),
@@ -207,7 +228,7 @@ ENGINE_PAGE = """<!doctype html>
             trimHistory();
           }
           els.status.textContent = data.status === "ok" ? `Live - ${data.last_success_age_seconds ?? 0}s old` : data.error || data.status;
-          drawGauges(sample);
+          renderMetrics(sample);
           els.mapState.textContent = describeMapState(sample);
           renderAnalysis(data);
           els.detail.textContent = JSON.stringify(data, null, 2);
@@ -228,117 +249,17 @@ ENGINE_PAGE = """<!doctype html>
         els.engineWarnings.textContent = warnings.join(" / ") || "None";
       }
 
-      function drawGauges(sample) {
-        drawGauge(els.rpmGauge, { label: "RPM", value: sample.rpm, unit: "rpm", min: 0, max: 4000, minLabel: "0", maxLabel: "4k", color: "#54d6a5", decimals: 0 });
-        drawGauge(els.mapGauge, { label: "MAP", value: sample.mapKpaAvg, unit: "kPa", min: 0, max: 110, minLabel: "0", maxLabel: "110", color: "#f4c15d", decimals: 1 });
-        drawGauge(els.loadGauge, { label: "LOAD", value: sample.loadPercent, unit: "%", min: 0, max: 100, minLabel: "0", maxLabel: "100", color: "#66a8ff", decimals: 0 });
-        drawGauge(els.voltageGauge, { label: "BATTERY", value: sample.voltage, unit: "V", min: 11, max: 15, minLabel: "11", maxLabel: "15", color: "#e97b68", decimals: 2 });
+      function renderMetrics(sample) {
+        renderMetric(els.rpmValue, els.rpmBar, sample.rpm, 0, 4000, 0);
+        renderMetric(els.mapValue, els.mapBar, sample.mapKpaAvg, 0, 110, 1);
+        renderMetric(els.loadValue, els.loadBar, sample.loadPercent, 0, 100, 0);
+        renderMetric(els.voltageValue, els.voltageBar, sample.voltage, 11, 15, 2);
       }
 
-      function drawGauge(canvas, options) {
-        const ctx = canvas.getContext("2d");
-        const scale = window.devicePixelRatio || 1;
-        const bounds = canvas.getBoundingClientRect();
-        canvas.width = Math.max(1, Math.floor(bounds.width * scale));
-        canvas.height = Math.max(1, Math.floor(bounds.height * scale));
-        ctx.setTransform(scale, 0, 0, scale, 0, 0);
-
-        const width = bounds.width;
-        const height = bounds.height;
-        const centerX = width / 2;
-        const centerY = height * 0.82;
-        const radius = Math.min(width * 0.42, height * 0.70);
-        const start = degreesToRadians(155);
-        const sweep = degreesToRadians(230);
-        const end = start + sweep;
-        const ratio = Number.isFinite(options.value)
-          ? clamp((options.value - options.min) / (options.max - options.min), 0, 1)
-          : 0;
-        const angle = start + (sweep * ratio);
-
-        ctx.clearRect(0, 0, width, height);
-        ctx.lineCap = "round";
-        ctx.lineWidth = 10;
-        ctx.strokeStyle = "#20393d";
-        ctx.beginPath();
-        ctx.arc(centerX, centerY, radius, start, end);
-        ctx.stroke();
-
-        if (Number.isFinite(options.value)) {
-          ctx.strokeStyle = options.color;
-          ctx.beginPath();
-          ctx.arc(centerX, centerY, radius, start, angle);
-          ctx.stroke();
-        }
-
-        for (let index = 0; index <= 8; index += 1) {
-          const tickRatio = index / 8;
-          const tickAngle = start + (sweep * tickRatio);
-          const outer = radius + 2;
-          const inner = radius - (index % 2 === 0 ? 12 : 7);
-          ctx.strokeStyle = index % 2 === 0 ? "#557073" : "#345055";
-          ctx.lineWidth = index % 2 === 0 ? 2 : 1;
-          ctx.beginPath();
-          ctx.moveTo(centerX + Math.cos(tickAngle) * inner, centerY + Math.sin(tickAngle) * inner);
-          ctx.lineTo(centerX + Math.cos(tickAngle) * outer, centerY + Math.sin(tickAngle) * outer);
-          ctx.stroke();
-        }
-
-        const needleLength = radius - 28;
-        ctx.strokeStyle = "#eef7f5";
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        ctx.moveTo(centerX, centerY);
-        ctx.lineTo(centerX + Math.cos(angle) * needleLength, centerY + Math.sin(angle) * needleLength);
-        ctx.stroke();
-        ctx.fillStyle = options.color;
-        ctx.beginPath();
-        ctx.arc(centerX, centerY, 7, 0, Math.PI * 2);
-        ctx.fill();
-
-        const plateWidth = Math.min(150, width * 0.58);
-        const plateHeight = 70;
-        const plateX = centerX - plateWidth / 2;
-        const plateY = centerY - radius * 0.43;
-        ctx.fillStyle = "#071014";
-        roundRect(ctx, plateX, plateY, plateWidth, plateHeight, 8);
-        ctx.fill();
-        ctx.strokeStyle = "#173036";
-        ctx.lineWidth = 1;
-        ctx.stroke();
-
-        ctx.textAlign = "center";
-        ctx.fillStyle = "#8da4a2";
-        ctx.font = "12px system-ui";
-        ctx.fillText(options.label, centerX, plateY + 17);
-        ctx.fillStyle = "#eef7f5";
-        ctx.font = "700 32px system-ui";
-        const valueText = Number.isFinite(options.value) ? options.value.toFixed(options.decimals) : "--";
-        ctx.fillText(valueText, centerX, plateY + 48);
-        ctx.fillStyle = "#9fb2ae";
-        ctx.font = "13px system-ui";
-        ctx.fillText(options.unit, centerX, plateY + 64);
-        ctx.font = "12px system-ui";
-        ctx.fillText(options.minLabel, centerX + Math.cos(start) * (radius - 7), centerY + Math.sin(start) * (radius - 7) + 16);
-        ctx.fillText(options.maxLabel, centerX + Math.cos(end) * (radius - 7), centerY + Math.sin(end) * (radius - 7) + 16);
-      }
-
-      function degreesToRadians(degrees) {
-        return degrees * Math.PI / 180;
-      }
-
-      function roundRect(ctx, x, y, width, height, radius) {
-        ctx.beginPath();
-        ctx.moveTo(x + radius, y);
-        ctx.lineTo(x + width - radius, y);
-        ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
-        ctx.lineTo(x + width, y + height - radius);
-        ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
-        ctx.lineTo(x + radius, y + height);
-        ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
-        ctx.lineTo(x, y + radius);
-        ctx.quadraticCurveTo(x, y, x + radius, y);
-        ctx.closePath();
+      function renderMetric(valueElement, barElement, value, min, max, decimals) {
+        valueElement.textContent = Number.isFinite(value) ? value.toFixed(decimals) : "--";
+        const ratio = Number.isFinite(value) ? clamp((value - min) / (max - min), 0, 1) : 0;
+        barElement.style.width = `${ratio * 100}%`;
       }
 
       function normalizeSample(data) {
