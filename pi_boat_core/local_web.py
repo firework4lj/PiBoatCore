@@ -108,11 +108,15 @@ ENGINE_PAGE = """<!doctype html>
       .legend { display: flex; flex-wrap: wrap; gap: 10px; color: #9fb2ae; font-size: 13px; }
       .legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; background: var(--color); }
       .analysis { display: grid; gap: 10px; }
+      .analysis-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+      .analysis-card { border: 1px solid #214044; border-radius: 8px; padding: 12px; background: #071014; }
+      .analysis-card span { display: block; color: #8da4a2; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; }
+      .analysis-card strong { display: block; margin-top: 6px; font-size: 20px; }
       .analysis strong { font-size: 20px; }
       .analysis p { margin: 0; color: #9fb2ae; line-height: 1.35; }
       pre { margin: 0; color: #9fb2ae; white-space: pre-wrap; font-size: 12px; }
-      @media (max-width: 900px) { .gauges, .charts { grid-template-columns: 1fr 1fr; } .chart-stack { grid-column: 1 / -1; } }
-      @media (max-width: 640px) { main { padding: 12px; } .gauges, .charts { grid-template-columns: 1fr; } canvas { height: 180px; } }
+      @media (max-width: 900px) { .gauges, .charts, .analysis-grid { grid-template-columns: 1fr 1fr; } .chart-stack { grid-column: 1 / -1; } }
+      @media (max-width: 640px) { main { padding: 12px; } .gauges, .charts, .analysis-grid { grid-template-columns: 1fr; } canvas { height: 180px; } }
     </style>
   </head>
   <body>
@@ -163,16 +167,23 @@ ENGINE_PAGE = """<!doctype html>
         </div>
       </section>
       <section class="panel analysis">
-        <h2>MAP Read</h2>
+        <h2>Engine Read</h2>
         <strong id="mapState">--</strong>
+        <div class="analysis-grid">
+          <div class="analysis-card"><span>State</span><strong id="engineState">--</strong></div>
+          <div class="analysis-card"><span>Idle Quality</span><strong id="idleQuality">--</strong></div>
+          <div class="analysis-card"><span>MAP Stability</span><strong id="mapStability">--</strong></div>
+          <div class="analysis-card"><span>Efficiency</span><strong id="efficiencyHint">--</strong></div>
+          <div class="analysis-card"><span>Warnings</span><strong id="engineWarnings">--</strong></div>
+        </div>
         <p id="mixtureNote">MAP by itself cannot determine lean or rich. For mixture you need an O2, wideband AFR, or EGT sensor. MAP can still show load, vacuum behavior, throttle changes, and possible vacuum leak clues.</p>
       </section>
       <pre id="detail"></pre>
     </main>
     <script>
       const HISTORY_MS = 60 * 1000;
-      const MAP_MIN_KPA = 10;
-      const MAP_MAX_KPA = 105;
+      const MAP_LOAD_IDLE_KPA = 35;
+      const MAP_LOAD_WOT_KPA = 100;
       const els = {
         status: document.querySelector("#status"),
         rpm: document.querySelector("#rpm"),
@@ -180,6 +191,11 @@ ENGINE_PAGE = """<!doctype html>
         load: document.querySelector("#load"),
         voltage: document.querySelector("#voltage"),
         mapState: document.querySelector("#mapState"),
+        engineState: document.querySelector("#engineState"),
+        idleQuality: document.querySelector("#idleQuality"),
+        mapStability: document.querySelector("#mapStability"),
+        efficiencyHint: document.querySelector("#efficiencyHint"),
+        engineWarnings: document.querySelector("#engineWarnings"),
         detail: document.querySelector("#detail"),
         compositeChart: document.querySelector("#compositeChart"),
         mapChart: document.querySelector("#mapChart"),
@@ -198,10 +214,11 @@ ENGINE_PAGE = """<!doctype html>
           }
           els.status.textContent = data.status === "ok" ? `Live - ${data.last_success_age_seconds ?? 0}s old` : data.error || data.status;
           els.rpm.textContent = Number.isFinite(sample.rpm) ? Math.round(sample.rpm) : "--";
-          els.map.textContent = Number.isFinite(sample.mapKpa) ? sample.mapKpa.toFixed(1) : "--";
+          els.map.textContent = Number.isFinite(sample.mapKpaAvg) ? sample.mapKpaAvg.toFixed(1) : "--";
           els.load.textContent = Number.isFinite(sample.loadPercent) ? sample.loadPercent.toFixed(0) : "--";
           els.voltage.textContent = Number.isFinite(sample.voltage) ? sample.voltage.toFixed(2) : "--";
           els.mapState.textContent = describeMapState(sample);
+          renderAnalysis(data);
           els.detail.textContent = JSON.stringify(data, null, 2);
           drawCharts();
         } catch (error) {
@@ -209,14 +226,30 @@ ENGINE_PAGE = """<!doctype html>
         }
       }
 
+      function renderAnalysis(data) {
+        els.engineState.textContent = labelValue(data.engine_state);
+        els.idleQuality.textContent = formatScore(data.idle_quality, data.idle_quality_score);
+        els.mapStability.textContent = formatScore(data.map_stability, data.map_stability_score);
+        els.efficiencyHint.textContent = formatScore(data.efficiency_hint, data.efficiency_score);
+        const warnings = [];
+        if (data.bog_detected) warnings.push("Bog");
+        if (data.stall_risk) warnings.push("Stall risk");
+        els.engineWarnings.textContent = warnings.join(" / ") || "None";
+      }
+
       function normalizeSample(data) {
         const mapKpa = Number(data.map_kpa);
+        const mapKpaAvg = Number(data.map_kpa_avg);
+        const loadPercent = Number(data.map_load_percent);
         return {
           status: data.status,
           timestamp: Date.now(),
           rpm: finiteOrNull(Number(data.rpm)),
+          rpmWindow: finiteOrNull(Number(data.rpm_window)),
+          rpmInstant: finiteOrNull(Number(data.rpm_instant)),
           mapKpa: finiteOrNull(mapKpa),
-          loadPercent: Number.isFinite(mapKpa) ? clamp(((mapKpa - MAP_MIN_KPA) / (MAP_MAX_KPA - MAP_MIN_KPA)) * 100, 0, 100) : null,
+          mapKpaAvg: Number.isFinite(mapKpaAvg) ? mapKpaAvg : finiteOrNull(mapKpa),
+          loadPercent: Number.isFinite(loadPercent) ? loadPercent : estimateLoadPercent(mapKpaAvg || mapKpa),
           voltage: finiteOrNull(Number(data.voltage)),
         };
       }
@@ -229,19 +262,20 @@ ENGINE_PAGE = """<!doctype html>
       }
 
       function describeMapState(sample) {
-        if (!Number.isFinite(sample.mapKpa)) {
+        const mapKpa = sample.mapKpaAvg;
+        if (!Number.isFinite(mapKpa)) {
           return "Waiting for MAP";
         }
         if (!Number.isFinite(sample.rpm) || sample.rpm < 250) {
-          return sample.mapKpa > 85 ? "Engine off / atmospheric MAP" : "Engine off or MAP calibration suspect";
+          return mapKpa > 85 ? "Engine off / atmospheric MAP" : "Engine off or MAP calibration suspect";
         }
-        if (sample.mapKpa < 35) {
-          return "High vacuum / light load";
+        if (sample.loadPercent <= 8) {
+          return "Near idle / very light load";
         }
-        if (sample.mapKpa < 60) {
-          return "Idle or easy cruise load";
+        if (sample.loadPercent <= 35) {
+          return "Efficient light load range";
         }
-        if (sample.mapKpa < 85) {
+        if (sample.loadPercent <= 75) {
           return "Moderate engine load";
         }
         return "High load / throttle open";
@@ -249,7 +283,7 @@ ENGINE_PAGE = """<!doctype html>
 
       function drawCharts() {
         drawCompositeChart(els.compositeChart, history);
-        drawMetricChart(els.mapChart, history, "mapKpa", "kPa", "#f4c15d", 0, 110);
+        drawMetricChart(els.mapChart, history, "mapKpaAvg", "kPa", "#f4c15d", 0, 110);
         const maxRpm = Math.max(1000, ...history.map((sample) => sample.rpm || 0)) * 1.15;
         drawMetricChart(els.rpmChart, history, "rpm", "rpm", "#54d6a5", 0, maxRpm);
       }
@@ -257,7 +291,7 @@ ENGINE_PAGE = """<!doctype html>
       function drawCompositeChart(canvas, samples) {
         const series = [
           { key: "rpm", label: "RPM", color: "#54d6a5", min: 0, max: Math.max(1000, ...samples.map((sample) => sample.rpm || 0)) * 1.15 },
-          { key: "mapKpa", label: "MAP", color: "#f4c15d", min: 0, max: 110 },
+          { key: "mapKpaAvg", label: "MAP", color: "#f4c15d", min: 0, max: 110 },
           { key: "loadPercent", label: "Load", color: "#66a8ff", min: 0, max: 100 },
         ];
         drawBase(canvas, (ctx, area, range) => {
@@ -329,6 +363,24 @@ ENGINE_PAGE = """<!doctype html>
 
       function finiteOrNull(value) {
         return Number.isFinite(value) ? value : null;
+      }
+
+      function formatScore(label, score) {
+        if (!label || label === "unknown") {
+          return "--";
+        }
+        const text = labelValue(label);
+        return Number.isFinite(score) ? `${text} ${Math.round(score)}` : text;
+      }
+
+      function labelValue(value) {
+        return String(value || "--").replaceAll("_", " ").replace(/\\b\\w/g, (letter) => letter.toUpperCase());
+      }
+
+      function estimateLoadPercent(mapKpa) {
+        return Number.isFinite(mapKpa)
+          ? clamp(((mapKpa - MAP_LOAD_IDLE_KPA) / (MAP_LOAD_WOT_KPA - MAP_LOAD_IDLE_KPA)) * 100, 0, 100)
+          : null;
       }
 
       function clamp(value, min, max) {

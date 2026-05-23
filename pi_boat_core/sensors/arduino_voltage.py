@@ -18,8 +18,15 @@ MAP_MIN_VOLTS = 0.50
 MAP_MAX_VOLTS = 4.50
 MAP_MIN_KPA = 10.0
 MAP_MAX_KPA = 105.0
+MAP_LOAD_IDLE_KPA = 35.0
+MAP_LOAD_WOT_KPA = 100.0
+MAP_SMOOTHING_ALPHA = 0.18
 SPARKS_PER_REVOLUTION = 0.5
 RPM_WINDOW_SECONDS = 1.0
+RPM_SMOOTHING_ALPHA = 0.25
+ENGINE_ANALYSIS_WINDOW_SECONDS = 10.0
+ENGINE_RUNNING_RPM = 350.0
+ENGINE_IDLE_RPM = 1100.0
 
 
 class ArduinoVoltageError(RuntimeError):
@@ -38,6 +45,9 @@ class ArduinoVoltageSensor(SensorAdapter):
         self._streaming = False
         self._stream_stop = threading.Event()
         self._tach_samples: deque[tuple[float, int, float]] = deque()
+        self._smoothed_rpm: float | None = None
+        self._smoothed_map_kpa: float | None = None
+        self._analysis_samples: deque[dict[str, float]] = deque()
 
     async def read(self) -> dict[str, Any]:
         if self._streaming:
@@ -169,6 +179,8 @@ class ArduinoVoltageSensor(SensorAdapter):
 
                 sampled_at = time.monotonic()
                 self._apply_rolling_rpm(payload, sampled_at)
+                self._apply_map_smoothing(payload)
+                self._apply_engine_analysis(payload, sampled_at)
                 self._consecutive_failures = 0
                 self._last_error = None
                 self._last_success_monotonic = sampled_at
@@ -187,9 +199,45 @@ class ArduinoVoltageSensor(SensorAdapter):
 
         total_pulses = sum(sample[1] for sample in self._tach_samples)
         total_interval_ms = sum(sample[2] for sample in self._tach_samples)
+        window_rpm = estimate_rpm(total_pulses, total_interval_ms)
+        if self._smoothed_rpm is None:
+            self._smoothed_rpm = window_rpm
+        elif window_rpm == 0:
+            self._smoothed_rpm = 0.0
+        else:
+            self._smoothed_rpm = (RPM_SMOOTHING_ALPHA * window_rpm) + ((1 - RPM_SMOOTHING_ALPHA) * self._smoothed_rpm)
+
         payload["rpm_instant"] = payload.get("rpm")
-        payload["rpm"] = estimate_rpm(total_pulses, total_interval_ms)
+        payload["rpm_window"] = window_rpm
+        payload["rpm"] = self._smoothed_rpm
         payload["rpm_window_seconds"] = round(total_interval_ms / 1000.0, 3)
+
+    def _apply_map_smoothing(self, payload: dict[str, Any]) -> None:
+        map_kpa = payload.get("map_kpa")
+        if not isinstance(map_kpa, int | float):
+            return
+
+        if self._smoothed_map_kpa is None:
+            self._smoothed_map_kpa = float(map_kpa)
+        else:
+            self._smoothed_map_kpa = (MAP_SMOOTHING_ALPHA * float(map_kpa)) + (
+                (1 - MAP_SMOOTHING_ALPHA) * self._smoothed_map_kpa
+            )
+
+        payload["map_kpa_avg"] = self._smoothed_map_kpa
+        payload["map_load_raw_percent"] = payload.get("map_load_percent")
+        payload["map_load_percent"] = estimate_map_load_percent(self._smoothed_map_kpa)
+
+    def _apply_engine_analysis(self, payload: dict[str, Any], sampled_at: float) -> None:
+        sample = _analysis_sample(payload, sampled_at)
+        if sample is not None:
+            self._analysis_samples.append(sample)
+
+        cutoff = sampled_at - ENGINE_ANALYSIS_WINDOW_SECONDS
+        while self._analysis_samples and self._analysis_samples[0]["timestamp"] < cutoff:
+            self._analysis_samples.popleft()
+
+        payload.update(analyze_engine_window(list(self._analysis_samples)))
 
     def _heartbeat_payload(self) -> dict[str, Any]:
         if self._last_success_payload is None:
@@ -313,7 +361,7 @@ def estimate_map_kpa(volts: float) -> float:
 
 
 def estimate_map_load_percent(map_kpa: float) -> float:
-    ratio = (map_kpa - MAP_MIN_KPA) / (MAP_MAX_KPA - MAP_MIN_KPA)
+    ratio = (map_kpa - MAP_LOAD_IDLE_KPA) / (MAP_LOAD_WOT_KPA - MAP_LOAD_IDLE_KPA)
     return min(100.0, max(0.0, ratio * 100.0))
 
 
@@ -346,6 +394,145 @@ def estimate_lead_acid_soc(voltage: float) -> int:
     if voltage >= 11.31:
         return 10
     return 0
+
+
+def analyze_engine_window(samples: list[dict[str, float]]) -> dict[str, Any]:
+    if not samples:
+        return {
+            "engine_state": "unknown",
+            "idle_quality": "unknown",
+            "map_stability": "unknown",
+            "efficiency_hint": "unknown",
+            "bog_detected": False,
+            "stall_risk": False,
+        }
+
+    latest = samples[-1]
+    rpm = latest["rpm"]
+    map_kpa = latest["map_kpa"]
+    load_percent = latest["load_percent"]
+    running_samples = [sample for sample in samples if sample["rpm"] >= ENGINE_RUNNING_RPM]
+    rpm_values = [sample["rpm"] for sample in running_samples]
+    map_values = [sample["map_kpa"] for sample in running_samples]
+    load_values = [sample["load_percent"] for sample in running_samples]
+    rpm_stddev = stddev(rpm_values)
+    map_stddev = stddev(map_values)
+    avg_load = average(load_values)
+
+    engine_state = classify_engine_state(rpm, load_percent)
+    idle_quality_score = score_inverse(rpm_stddev, excellent=35, poor=180) if engine_state == "idle" else None
+    map_stability_score = score_inverse(map_stddev, excellent=1.5, poor=8.0) if running_samples else None
+    efficiency_score = estimate_efficiency_score(samples, rpm_stddev, map_stddev, avg_load)
+    bog_detected = detect_bog(samples)
+    stall_risk = engine_state in {"idle", "running"} and rpm < 500
+
+    return {
+        "engine_state": engine_state,
+        "idle_quality": label_score(idle_quality_score),
+        "idle_quality_score": idle_quality_score,
+        "rpm_stddev": rpm_stddev,
+        "map_stability": label_score(map_stability_score),
+        "map_stability_score": map_stability_score,
+        "map_stddev": map_stddev,
+        "efficiency_hint": label_score(efficiency_score),
+        "efficiency_score": efficiency_score,
+        "average_load_percent": avg_load,
+        "bog_detected": bog_detected,
+        "stall_risk": stall_risk,
+        "analysis_window_seconds": round(samples[-1]["timestamp"] - samples[0]["timestamp"], 1),
+    }
+
+
+def classify_engine_state(rpm: float, load_percent: float) -> str:
+    if rpm < 80:
+        return "off"
+    if rpm < ENGINE_RUNNING_RPM:
+        return "cranking"
+    if rpm < ENGINE_IDLE_RPM and load_percent <= 20:
+        return "idle"
+    if load_percent <= 35:
+        return "light_load"
+    if load_percent <= 75:
+        return "moderate_load"
+    return "heavy_load"
+
+
+def estimate_efficiency_score(
+    samples: list[dict[str, float]],
+    rpm_stddev: float | None,
+    map_stddev: float | None,
+    avg_load: float | None,
+) -> float | None:
+    running_samples = [sample for sample in samples if sample["rpm"] >= ENGINE_RUNNING_RPM]
+    if len(running_samples) < 5 or rpm_stddev is None or map_stddev is None or avg_load is None:
+        return None
+
+    load_score = 100.0 - abs(avg_load - 25.0) * 2.0
+    rpm_score = score_inverse(rpm_stddev, excellent=40, poor=220) or 0.0
+    map_score = score_inverse(map_stddev, excellent=1.5, poor=8.0) or 0.0
+    return min(100.0, max(0.0, (load_score * 0.45) + (rpm_score * 0.35) + (map_score * 0.20)))
+
+
+def detect_bog(samples: list[dict[str, float]]) -> bool:
+    if len(samples) < 5:
+        return False
+
+    recent = samples[-min(len(samples), 40) :]
+    first = recent[0]
+    last = recent[-1]
+    map_delta = last["map_kpa"] - first["map_kpa"]
+    rpm_delta = last["rpm"] - first["rpm"]
+    return map_delta >= 12 and rpm_delta <= -120
+
+
+def _analysis_sample(payload: dict[str, Any], sampled_at: float) -> dict[str, float] | None:
+    rpm = payload.get("rpm")
+    map_kpa = payload.get("map_kpa_avg", payload.get("map_kpa"))
+    load_percent = payload.get("map_load_percent")
+    voltage = payload.get("voltage")
+    if not all(isinstance(value, int | float) for value in (rpm, map_kpa, load_percent, voltage)):
+        return None
+    return {
+        "timestamp": sampled_at,
+        "rpm": float(rpm),
+        "map_kpa": float(map_kpa),
+        "load_percent": float(load_percent),
+        "voltage": float(voltage),
+    }
+
+
+def average(values: list[float]) -> float | None:
+    return sum(values) / len(values) if values else None
+
+
+def stddev(values: list[float]) -> float | None:
+    if len(values) < 2:
+        return None
+    mean = average(values)
+    if mean is None:
+        return None
+    variance = sum((value - mean) ** 2 for value in values) / len(values)
+    return variance ** 0.5
+
+
+def score_inverse(value: float | None, *, excellent: float, poor: float) -> float | None:
+    if value is None:
+        return None
+    if value <= excellent:
+        return 100.0
+    if value >= poor:
+        return 0.0
+    return 100.0 * (1.0 - ((value - excellent) / (poor - excellent)))
+
+
+def label_score(score: float | None) -> str:
+    if score is None:
+        return "unknown"
+    if score >= 80:
+        return "good"
+    if score >= 55:
+        return "fair"
+    return "poor"
 
 
 def _required_number(payload: dict[str, Any], field: str) -> float:
