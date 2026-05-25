@@ -248,9 +248,12 @@ ENGINE_PAGE = """<!doctype html>
       .saved-run strong, .saved-run small { display: block; min-width: 0; overflow-wrap: anywhere; }
       .saved-run small { color: #9fb2ae; font-size: 12px; margin-top: 2px; }
       .tune-panel { display: grid; gap: 10px; }
-      .tune-instruction { background: #071014; border: 1px solid #2b555c; border-radius: 8px; font-size: clamp(22px, 4vw, 42px); font-weight: 900; line-height: 1.12; padding: 16px; }
+      .tune-result { border-radius: 8px; border: 1px solid #2b555c; background: #071014; font-size: clamp(22px, 4vw, 40px); font-weight: 900; line-height: 1.1; padding: 14px; }
+      .tune-result.good { border-color: #2f8f72; color: #54d6a5; }
+      .tune-result.bad { border-color: #9b4d44; color: #e97b68; }
+      .tune-result.neutral { border-color: #827342; color: #f4c15d; }
       .tune-detail { color: #9fb2ae; line-height: 1.35; margin: 0; }
-      .tune-stats { display: grid; gap: 8px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+      .tune-stats { display: grid; gap: 8px; grid-template-columns: repeat(5, minmax(0, 1fr)); }
       .tune-stats div { background: #071014; border: 1px solid #214044; border-radius: 8px; padding: 10px; }
       .tune-stats span { color: #8da4a2; display: block; font-size: 11px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }
       .tune-stats strong { display: block; font-size: 18px; margin-top: 4px; }
@@ -291,26 +294,6 @@ ENGINE_PAGE = """<!doctype html>
           <button type="button" id="discardRunButton" disabled>Discard</button>
         </div>
         <div id="savedRuns" class="saved-runs"></div>
-      </section>
-      <section class="panel tune-panel">
-        <header>
-          <h2>Carb Tune</h2>
-          <span class="run-status">Fuel screws</span>
-        </header>
-        <div class="tune-instruction" id="tuneInstruction">Warm engine fully, set idle, then start tune.</div>
-        <p class="tune-detail" id="tuneDetail">This guides fuel screws by looking for highest/smoothest idle vacuum. Fuel screw OUT is richer; IN is leaner.</p>
-        <div class="run-controls">
-          <button type="button" id="startTuneButton" class="primary-button">Start Tune</button>
-          <button type="button" id="tuneStepButton" disabled>Done With Step</button>
-          <button type="button" id="tuneSwitchButton" disabled>Switch Screw</button>
-          <button type="button" id="stopTuneButton" disabled>Stop</button>
-        </div>
-        <div class="tune-stats">
-          <div><span>Step</span><strong id="tuneStep">--</strong></div>
-          <div><span>Avg RPM</span><strong id="tuneRpm">--</strong></div>
-          <div><span>Avg MAP</span><strong id="tuneMap">--</strong></div>
-          <div><span>Stability</span><strong id="tuneStability">--</strong></div>
-        </div>
       </section>
       <section class="metrics">
         <div class="metric">
@@ -373,6 +356,25 @@ ENGINE_PAGE = """<!doctype html>
         </div>
         <p id="mixtureNote">MAP by itself cannot determine lean or rich. For mixture you need an O2, wideband AFR, or EGT sensor. MAP can still show load, vacuum behavior, throttle changes, and possible vacuum leak clues.</p>
       </section>
+      <section class="panel tune-panel">
+        <header>
+          <h2>Carb Tune</h2>
+          <span class="run-status">Fuel screws: OUT richer / IN leaner</span>
+        </header>
+        <div class="tune-result" id="tuneResult">Set a baseline, then adjust and glance here.</div>
+        <p class="tune-detail" id="tuneDetail">Use at fully warm idle. Lower MAP, steadier MAP, and steadier/higher RPM generally mean the adjustment helped.</p>
+        <div class="run-controls">
+          <button type="button" id="setTuneBaselineButton" class="primary-button">Set Baseline</button>
+          <button type="button" id="resetTuneButton" disabled>Reset</button>
+        </div>
+        <div class="tune-stats">
+          <div><span>RPM Change</span><strong id="tuneRpmDelta">--</strong></div>
+          <div><span>MAP Change</span><strong id="tuneMapDelta">--</strong></div>
+          <div><span>Stability Change</span><strong id="tuneStabilityDelta">--</strong></div>
+          <div><span>Current RPM</span><strong id="tuneRpm">--</strong></div>
+          <div><span>Current MAP</span><strong id="tuneMap">--</strong></div>
+        </div>
+      </section>
       <pre id="detail"></pre>
     </main>
     <script>
@@ -401,16 +403,15 @@ ENGINE_PAGE = """<!doctype html>
         saveRunButton: document.querySelector("#saveRunButton"),
         discardRunButton: document.querySelector("#discardRunButton"),
         savedRuns: document.querySelector("#savedRuns"),
-        startTuneButton: document.querySelector("#startTuneButton"),
-        tuneStepButton: document.querySelector("#tuneStepButton"),
-        tuneSwitchButton: document.querySelector("#tuneSwitchButton"),
-        stopTuneButton: document.querySelector("#stopTuneButton"),
-        tuneInstruction: document.querySelector("#tuneInstruction"),
+        setTuneBaselineButton: document.querySelector("#setTuneBaselineButton"),
+        resetTuneButton: document.querySelector("#resetTuneButton"),
+        tuneResult: document.querySelector("#tuneResult"),
         tuneDetail: document.querySelector("#tuneDetail"),
-        tuneStep: document.querySelector("#tuneStep"),
+        tuneRpmDelta: document.querySelector("#tuneRpmDelta"),
+        tuneMapDelta: document.querySelector("#tuneMapDelta"),
+        tuneStabilityDelta: document.querySelector("#tuneStabilityDelta"),
         tuneRpm: document.querySelector("#tuneRpm"),
         tuneMap: document.querySelector("#tuneMap"),
-        tuneStability: document.querySelector("#tuneStability"),
         compositeChart: document.querySelector("#compositeChart"),
         mapChart: document.querySelector("#mapChart"),
         rpmChart: document.querySelector("#rpmChart"),
@@ -423,10 +424,8 @@ ENGINE_PAGE = """<!doctype html>
       els.startRunButton.addEventListener("click", startRun);
       els.saveRunButton.addEventListener("click", saveRun);
       els.discardRunButton.addEventListener("click", discardRun);
-      els.startTuneButton.addEventListener("click", startCarbTune);
-      els.tuneStepButton.addEventListener("click", markTuneStep);
-      els.tuneSwitchButton.addEventListener("click", switchTuneScrew);
-      els.stopTuneButton.addEventListener("click", stopCarbTune);
+      els.setTuneBaselineButton.addEventListener("click", setTuneBaseline);
+      els.resetTuneButton.addEventListener("click", resetTuneBaseline);
 
       async function refresh() {
         try {
@@ -574,123 +573,76 @@ ENGINE_PAGE = """<!doctype html>
         els.engineWarnings.textContent = warnings.join(" / ") || "None";
       }
 
-      function startCarbTune() {
-        carbTune = {
-          active: true,
-          screw: "A",
-          direction: "out",
-          step: 0,
-          phase: "baseline",
-          baseline: null,
-          best: null,
-          previous: null,
-          measureStart: Date.now(),
-          lastInstruction: "Hold warm idle steady. Capturing baseline...",
-        };
+      function setTuneBaseline() {
+        const reading = currentTuneReading();
+        if (!reading) {
+          carbTune = { baseline: null, setAt: Date.now(), status: "waiting" };
+          renderCarbTune();
+          return;
+        }
+
+        carbTune = { baseline: reading, setAt: Date.now(), status: "ready" };
         renderCarbTune();
       }
 
-      function stopCarbTune() {
+      function resetTuneBaseline() {
         carbTune = null;
         renderCarbTune();
       }
 
-      function switchTuneScrew() {
-        if (!carbTune) {
-          return;
-        }
-        carbTune.screw = carbTune.screw === "A" ? "B" : "A";
-        carbTune.direction = "out";
-        carbTune.step = 0;
-        carbTune.phase = "baseline";
-        carbTune.baseline = null;
-        carbTune.best = null;
-        carbTune.previous = null;
-        carbTune.measureStart = Date.now();
-        carbTune.lastInstruction = `Now tuning Screw ${carbTune.screw}. Hold idle steady for baseline.`;
-        renderCarbTune();
-      }
-
-      function markTuneStep() {
-        if (!carbTune) {
-          return;
-        }
-        const reading = tuneReadingSince(carbTune.measureStart);
-        if (!reading) {
-          carbTune.lastInstruction = "Need a few more seconds of stable readings.";
-          renderCarbTune();
-          return;
-        }
-
-        if (carbTune.phase === "baseline") {
-          carbTune.baseline = reading;
-          carbTune.best = reading;
-          carbTune.previous = reading;
-          carbTune.phase = "adjust";
-          carbTune.measureStart = Date.now();
-          carbTune.lastInstruction = `Screw ${carbTune.screw}: turn OUT 1/8 turn.`;
-          renderCarbTune();
-          return;
-        }
-
-        const score = scoreTuneReading(reading);
-        const previousScore = scoreTuneReading(carbTune.previous);
-        const bestScore = scoreTuneReading(carbTune.best);
-        const improved = score > previousScore + 0.5;
-        const bestImproved = score > bestScore + 0.5;
-        carbTune.step += 1;
-
-        if (bestImproved) {
-          carbTune.best = reading;
-        }
-
-        if (improved) {
-          carbTune.lastInstruction = `Good. Screw ${carbTune.screw}: continue ${carbTune.direction.toUpperCase()} 1/8 turn.`;
-        } else {
-          carbTune.direction = carbTune.direction === "out" ? "in" : "out";
-          carbTune.lastInstruction = `Worse. Reverse last move. Screw ${carbTune.screw}: turn ${carbTune.direction.toUpperCase()} 1/8 turn.`;
-        }
-
-        if (Number.isFinite(reading.rpmAvg) && Number.isFinite(carbTune.baseline?.rpmAvg) && reading.rpmAvg > carbTune.baseline.rpmAvg + 150) {
-          carbTune.lastInstruction += " Idle rose; reset idle speed lower after this screw.";
-        }
-
-        carbTune.previous = reading;
-        carbTune.measureStart = Date.now();
-        renderCarbTune();
-      }
-
       function renderCarbTune() {
-        if (!carbTune) {
-          els.tuneInstruction.textContent = "Warm engine fully, set idle, then start tune.";
-          els.tuneDetail.textContent = "This guides fuel screws by looking for highest/smoothest idle vacuum. Fuel screw OUT is richer; IN is leaner.";
-          els.tuneStep.textContent = "--";
-          els.tuneRpm.textContent = "--";
-          els.tuneMap.textContent = "--";
-          els.tuneStability.textContent = "--";
-          els.startTuneButton.disabled = false;
-          els.tuneStepButton.disabled = true;
-          els.tuneSwitchButton.disabled = true;
-          els.stopTuneButton.disabled = true;
+        const current = currentTuneReading();
+        if (!carbTune?.baseline) {
+          setTuneResult("Set Baseline", "neutral");
+          els.tuneDetail.textContent = current
+            ? "Idle is readable. Press Set Baseline, then make an adjustment and watch this panel."
+            : "Waiting for enough warm-idle data. Hold idle steady for a few seconds.";
+          els.tuneRpmDelta.textContent = "--";
+          els.tuneMapDelta.textContent = "--";
+          els.tuneStabilityDelta.textContent = "--";
+          els.tuneRpm.textContent = current ? `${Math.round(current.rpmAvg)} rpm` : "--";
+          els.tuneMap.textContent = current ? `${current.mapAvg.toFixed(1)} kPa` : "--";
+          els.setTuneBaselineButton.disabled = !current;
+          els.resetTuneButton.disabled = true;
           return;
         }
 
-        const current = tuneReadingSince(carbTune.measureStart);
-        els.tuneInstruction.textContent = carbTune.lastInstruction;
-        els.tuneDetail.textContent = carbTune.phase === "baseline"
-          ? "Hold the current idle steady, then press Done With Step after about 8-10 seconds."
-          : "Make the instructed 1/8-turn adjustment, wait 8-10 seconds for idle to settle, then press Done With Step.";
-        els.tuneStep.textContent = `Screw ${carbTune.screw} / ${carbTune.phase === "baseline" ? "baseline" : `step ${carbTune.step + 1}`}`;
-        els.tuneRpm.textContent = current ? `${Math.round(current.rpmAvg)} rpm` : "--";
-        els.tuneMap.textContent = current ? `${current.mapAvg.toFixed(1)} kPa` : "--";
-        els.tuneStability.textContent = current ? `${current.stability.toFixed(1)}` : "--";
-        els.startTuneButton.disabled = true;
-        els.tuneStepButton.disabled = false;
-        els.tuneSwitchButton.disabled = carbTune.phase === "baseline";
-        els.stopTuneButton.disabled = false;
+        if (!current) {
+          setTuneResult("Settling...", "neutral");
+          els.tuneDetail.textContent = "Hold idle steady for a few seconds after each adjustment.";
+          els.setTuneBaselineButton.disabled = false;
+          els.resetTuneButton.disabled = false;
+          return;
+        }
+
+        const baseline = carbTune.baseline;
+        const rpmDelta = current.rpmAvg - baseline.rpmAvg;
+        const mapDelta = current.mapAvg - baseline.mapAvg;
+        const stabilityDelta = current.stability - baseline.stability;
+        const scoreDelta = scoreTuneReading(current) - scoreTuneReading(baseline);
+
+        if (scoreDelta > 1.2) {
+          setTuneResult("Adjustment Helped", "good");
+          els.tuneDetail.textContent = "Idle quality improved versus baseline. Lower MAP/steadier idle is the win.";
+        } else if (scoreDelta < -1.2) {
+          setTuneResult("Adjustment Hurt", "bad");
+          els.tuneDetail.textContent = "Idle quality worsened versus baseline. Reverse that last adjustment.";
+        } else {
+          setTuneResult("No Clear Change", "neutral");
+          els.tuneDetail.textContent = "Change is small or still settling. Give it a few seconds or make a smaller adjustment.";
+        }
+
+        els.tuneRpmDelta.textContent = formatSigned(rpmDelta, " rpm", 0);
+        els.tuneMapDelta.textContent = formatSigned(mapDelta, " kPa", 1);
+        els.tuneStabilityDelta.textContent = formatSigned(stabilityDelta, "", 1);
+        els.tuneRpm.textContent = `${Math.round(current.rpmAvg)} rpm`;
+        els.tuneMap.textContent = `${current.mapAvg.toFixed(1)} kPa`;
+        els.setTuneBaselineButton.disabled = false;
+        els.resetTuneButton.disabled = false;
       }
 
-      function tuneReadingSince(startTime) {
+      function currentTuneReading() {
+        const startTime = Date.now() - 8000;
         const samples = history.filter((sample) =>
           sample.timestamp >= startTime &&
           Number.isFinite(sample.rpm) &&
@@ -715,6 +667,19 @@ ENGINE_PAGE = """<!doctype html>
           return -Infinity;
         }
         return (reading.rpmAvg / 40) - (reading.mapAvg * 1.4) - (reading.rpmStddev / 20) - (reading.mapStddev * 5);
+      }
+
+      function setTuneResult(text, state) {
+        els.tuneResult.textContent = text;
+        els.tuneResult.className = `tune-result ${state}`;
+      }
+
+      function formatSigned(value, unit, decimals) {
+        if (!Number.isFinite(value)) {
+          return "--";
+        }
+        const sign = value > 0 ? "+" : "";
+        return `${sign}${value.toFixed(decimals)}${unit}`;
       }
 
       function renderMetrics(sample) {
