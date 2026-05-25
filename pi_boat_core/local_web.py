@@ -241,11 +241,19 @@ ENGINE_PAGE = """<!doctype html>
       .run-controls { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; }
       button { background: #102a32; border: 1px solid #2b555c; border-radius: 7px; color: #eef7f5; cursor: pointer; font: inherit; font-weight: 700; padding: 8px 11px; }
       button:disabled { cursor: not-allowed; opacity: 0.45; }
+      .primary-button { background: #0f5f78; border-color: #1784a5; }
       .run-status { color: #9fb2ae; font-size: 13px; }
       .saved-runs { display: grid; gap: 8px; margin-top: 10px; }
       .saved-run { align-items: center; background: #071014; border: 1px solid #214044; border-radius: 7px; display: grid; gap: 8px; grid-template-columns: minmax(0, 1fr) auto auto; padding: 9px; }
       .saved-run strong, .saved-run small { display: block; min-width: 0; overflow-wrap: anywhere; }
       .saved-run small { color: #9fb2ae; font-size: 12px; margin-top: 2px; }
+      .tune-panel { display: grid; gap: 10px; }
+      .tune-instruction { background: #071014; border: 1px solid #2b555c; border-radius: 8px; font-size: clamp(22px, 4vw, 42px); font-weight: 900; line-height: 1.12; padding: 16px; }
+      .tune-detail { color: #9fb2ae; line-height: 1.35; margin: 0; }
+      .tune-stats { display: grid; gap: 8px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+      .tune-stats div { background: #071014; border: 1px solid #214044; border-radius: 8px; padding: 10px; }
+      .tune-stats span { color: #8da4a2; display: block; font-size: 11px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }
+      .tune-stats strong { display: block; font-size: 18px; margin-top: 4px; }
       .charts { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(280px, 0.7fr); gap: 10px; }
       .chart-stack { display: grid; gap: 10px; }
       .panel header { margin-bottom: 10px; }
@@ -262,7 +270,7 @@ ENGINE_PAGE = """<!doctype html>
       .analysis p { margin: 0; color: #9fb2ae; line-height: 1.35; }
       pre { margin: 0; color: #9fb2ae; white-space: pre-wrap; font-size: 12px; }
       @media (max-width: 900px) { .metrics, .charts, .analysis-grid { grid-template-columns: 1fr 1fr; } .chart-stack { grid-column: 1 / -1; } }
-      @media (max-width: 640px) { main { padding: 12px; } .metrics, .charts, .analysis-grid { grid-template-columns: 1fr; } canvas { height: 180px; } }
+      @media (max-width: 640px) { main { padding: 12px; } .metrics, .charts, .analysis-grid, .tune-stats { grid-template-columns: 1fr; } canvas { height: 180px; } }
       @media (max-width: 640px) { .saved-run { grid-template-columns: 1fr; } }
     </style>
   </head>
@@ -283,6 +291,26 @@ ENGINE_PAGE = """<!doctype html>
           <button type="button" id="discardRunButton" disabled>Discard</button>
         </div>
         <div id="savedRuns" class="saved-runs"></div>
+      </section>
+      <section class="panel tune-panel">
+        <header>
+          <h2>Carb Tune</h2>
+          <span class="run-status">Fuel screws</span>
+        </header>
+        <div class="tune-instruction" id="tuneInstruction">Warm engine fully, set idle, then start tune.</div>
+        <p class="tune-detail" id="tuneDetail">This guides fuel screws by looking for highest/smoothest idle vacuum. Fuel screw OUT is richer; IN is leaner.</p>
+        <div class="run-controls">
+          <button type="button" id="startTuneButton" class="primary-button">Start Tune</button>
+          <button type="button" id="tuneStepButton" disabled>Done With Step</button>
+          <button type="button" id="tuneSwitchButton" disabled>Switch Screw</button>
+          <button type="button" id="stopTuneButton" disabled>Stop</button>
+        </div>
+        <div class="tune-stats">
+          <div><span>Step</span><strong id="tuneStep">--</strong></div>
+          <div><span>Avg RPM</span><strong id="tuneRpm">--</strong></div>
+          <div><span>Avg MAP</span><strong id="tuneMap">--</strong></div>
+          <div><span>Stability</span><strong id="tuneStability">--</strong></div>
+        </div>
       </section>
       <section class="metrics">
         <div class="metric">
@@ -373,6 +401,16 @@ ENGINE_PAGE = """<!doctype html>
         saveRunButton: document.querySelector("#saveRunButton"),
         discardRunButton: document.querySelector("#discardRunButton"),
         savedRuns: document.querySelector("#savedRuns"),
+        startTuneButton: document.querySelector("#startTuneButton"),
+        tuneStepButton: document.querySelector("#tuneStepButton"),
+        tuneSwitchButton: document.querySelector("#tuneSwitchButton"),
+        stopTuneButton: document.querySelector("#stopTuneButton"),
+        tuneInstruction: document.querySelector("#tuneInstruction"),
+        tuneDetail: document.querySelector("#tuneDetail"),
+        tuneStep: document.querySelector("#tuneStep"),
+        tuneRpm: document.querySelector("#tuneRpm"),
+        tuneMap: document.querySelector("#tuneMap"),
+        tuneStability: document.querySelector("#tuneStability"),
         compositeChart: document.querySelector("#compositeChart"),
         mapChart: document.querySelector("#mapChart"),
         rpmChart: document.querySelector("#rpmChart"),
@@ -380,10 +418,15 @@ ENGINE_PAGE = """<!doctype html>
       const history = [];
       let activeRun = null;
       let reviewSamples = null;
+      let carbTune = null;
 
       els.startRunButton.addEventListener("click", startRun);
       els.saveRunButton.addEventListener("click", saveRun);
       els.discardRunButton.addEventListener("click", discardRun);
+      els.startTuneButton.addEventListener("click", startCarbTune);
+      els.tuneStepButton.addEventListener("click", markTuneStep);
+      els.tuneSwitchButton.addEventListener("click", switchTuneScrew);
+      els.stopTuneButton.addEventListener("click", stopCarbTune);
 
       async function refresh() {
         try {
@@ -404,6 +447,7 @@ ENGINE_PAGE = """<!doctype html>
           els.detail.textContent = JSON.stringify(data, null, 2);
           drawCharts();
           renderRunStatus();
+          renderCarbTune();
         } catch (error) {
           els.status.textContent = error.message;
         }
@@ -528,6 +572,149 @@ ENGINE_PAGE = """<!doctype html>
         if (data.bog_detected) warnings.push("Bog");
         if (data.stall_risk) warnings.push("Stall risk");
         els.engineWarnings.textContent = warnings.join(" / ") || "None";
+      }
+
+      function startCarbTune() {
+        carbTune = {
+          active: true,
+          screw: "A",
+          direction: "out",
+          step: 0,
+          phase: "baseline",
+          baseline: null,
+          best: null,
+          previous: null,
+          measureStart: Date.now(),
+          lastInstruction: "Hold warm idle steady. Capturing baseline...",
+        };
+        renderCarbTune();
+      }
+
+      function stopCarbTune() {
+        carbTune = null;
+        renderCarbTune();
+      }
+
+      function switchTuneScrew() {
+        if (!carbTune) {
+          return;
+        }
+        carbTune.screw = carbTune.screw === "A" ? "B" : "A";
+        carbTune.direction = "out";
+        carbTune.step = 0;
+        carbTune.phase = "baseline";
+        carbTune.baseline = null;
+        carbTune.best = null;
+        carbTune.previous = null;
+        carbTune.measureStart = Date.now();
+        carbTune.lastInstruction = `Now tuning Screw ${carbTune.screw}. Hold idle steady for baseline.`;
+        renderCarbTune();
+      }
+
+      function markTuneStep() {
+        if (!carbTune) {
+          return;
+        }
+        const reading = tuneReadingSince(carbTune.measureStart);
+        if (!reading) {
+          carbTune.lastInstruction = "Need a few more seconds of stable readings.";
+          renderCarbTune();
+          return;
+        }
+
+        if (carbTune.phase === "baseline") {
+          carbTune.baseline = reading;
+          carbTune.best = reading;
+          carbTune.previous = reading;
+          carbTune.phase = "adjust";
+          carbTune.measureStart = Date.now();
+          carbTune.lastInstruction = `Screw ${carbTune.screw}: turn OUT 1/8 turn.`;
+          renderCarbTune();
+          return;
+        }
+
+        const score = scoreTuneReading(reading);
+        const previousScore = scoreTuneReading(carbTune.previous);
+        const bestScore = scoreTuneReading(carbTune.best);
+        const improved = score > previousScore + 0.5;
+        const bestImproved = score > bestScore + 0.5;
+        carbTune.step += 1;
+
+        if (bestImproved) {
+          carbTune.best = reading;
+        }
+
+        if (improved) {
+          carbTune.lastInstruction = `Good. Screw ${carbTune.screw}: continue ${carbTune.direction.toUpperCase()} 1/8 turn.`;
+        } else {
+          carbTune.direction = carbTune.direction === "out" ? "in" : "out";
+          carbTune.lastInstruction = `Worse. Reverse last move. Screw ${carbTune.screw}: turn ${carbTune.direction.toUpperCase()} 1/8 turn.`;
+        }
+
+        if (Number.isFinite(reading.rpmAvg) && Number.isFinite(carbTune.baseline?.rpmAvg) && reading.rpmAvg > carbTune.baseline.rpmAvg + 150) {
+          carbTune.lastInstruction += " Idle rose; reset idle speed lower after this screw.";
+        }
+
+        carbTune.previous = reading;
+        carbTune.measureStart = Date.now();
+        renderCarbTune();
+      }
+
+      function renderCarbTune() {
+        if (!carbTune) {
+          els.tuneInstruction.textContent = "Warm engine fully, set idle, then start tune.";
+          els.tuneDetail.textContent = "This guides fuel screws by looking for highest/smoothest idle vacuum. Fuel screw OUT is richer; IN is leaner.";
+          els.tuneStep.textContent = "--";
+          els.tuneRpm.textContent = "--";
+          els.tuneMap.textContent = "--";
+          els.tuneStability.textContent = "--";
+          els.startTuneButton.disabled = false;
+          els.tuneStepButton.disabled = true;
+          els.tuneSwitchButton.disabled = true;
+          els.stopTuneButton.disabled = true;
+          return;
+        }
+
+        const current = tuneReadingSince(carbTune.measureStart);
+        els.tuneInstruction.textContent = carbTune.lastInstruction;
+        els.tuneDetail.textContent = carbTune.phase === "baseline"
+          ? "Hold the current idle steady, then press Done With Step after about 8-10 seconds."
+          : "Make the instructed 1/8-turn adjustment, wait 8-10 seconds for idle to settle, then press Done With Step.";
+        els.tuneStep.textContent = `Screw ${carbTune.screw} / ${carbTune.phase === "baseline" ? "baseline" : `step ${carbTune.step + 1}`}`;
+        els.tuneRpm.textContent = current ? `${Math.round(current.rpmAvg)} rpm` : "--";
+        els.tuneMap.textContent = current ? `${current.mapAvg.toFixed(1)} kPa` : "--";
+        els.tuneStability.textContent = current ? `${current.stability.toFixed(1)}` : "--";
+        els.startTuneButton.disabled = true;
+        els.tuneStepButton.disabled = false;
+        els.tuneSwitchButton.disabled = carbTune.phase === "baseline";
+        els.stopTuneButton.disabled = false;
+      }
+
+      function tuneReadingSince(startTime) {
+        const samples = history.filter((sample) =>
+          sample.timestamp >= startTime &&
+          Number.isFinite(sample.rpm) &&
+          Number.isFinite(sample.mapKpaAvg)
+        );
+        if (samples.length < 40) {
+          return null;
+        }
+        const rpmValues = samples.map((sample) => sample.rpm);
+        const mapValues = samples.map((sample) => sample.mapKpaAvg);
+        return {
+          rpmAvg: average(rpmValues),
+          mapAvg: average(mapValues),
+          rpmStddev: stddev(rpmValues),
+          mapStddev: stddev(mapValues),
+          stability: (stddev(rpmValues) / 25) + (stddev(mapValues) * 4),
+        };
+      }
+
+      function scoreTuneReading(reading) {
+        if (!reading) {
+          return -Infinity;
+        }
+        return (reading.rpmAvg / 40) - (reading.mapAvg * 1.4) - (reading.rpmStddev / 20) - (reading.mapStddev * 5);
       }
 
       function renderMetrics(sample) {
@@ -713,6 +900,15 @@ ENGINE_PAGE = """<!doctype html>
 
       function average(values) {
         return values.length ? Math.round((values.reduce((sum, value) => sum + value, 0) / values.length) * 10) / 10 : null;
+      }
+
+      function stddev(values) {
+        if (values.length < 2) {
+          return 0;
+        }
+        const avg = values.reduce((sum, value) => sum + value, 0) / values.length;
+        const variance = values.reduce((sum, value) => sum + ((value - avg) ** 2), 0) / values.length;
+        return Math.sqrt(variance);
       }
 
       function runSummary(run) {
