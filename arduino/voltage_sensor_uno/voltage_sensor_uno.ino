@@ -4,10 +4,16 @@ const int TACH_PIN = 2;
 
 const int SAMPLE_COUNT = 5;
 const unsigned long REPORT_INTERVAL_MS = 50;
-const unsigned long TACH_MIN_PULSE_GAP_US = 2500;
+const unsigned long TACH_MIN_PULSE_GAP_US = 8000;
 
-unsigned long lastReportMs = REPORT_INTERVAL_MS;
+struct TachCounts {
+  unsigned long accepted;
+  unsigned long rejected;
+};
+
+unsigned long lastReportMs = 0;
 volatile unsigned long tachPulseCount = 0;
+volatile unsigned long tachRejectedCount = 0;
 volatile unsigned long lastTachPulseUs = 0;
 
 void setup() {
@@ -24,20 +30,23 @@ void loop() {
     return;
   }
 
+  const unsigned long intervalMs = now - lastReportMs;
   lastReportMs = now;
 
   const int voltageRaw = readAnalogAverage(VOLTAGE_PIN);
   const int mapRaw = readAnalogAverage(MAP_PIN);
-  const unsigned long pulseCount = readAndResetTachPulseCount();
+  TachCounts tachCounts = readAndResetTachCounts();
 
   Serial.print("{\"type\":\"engine_raw\",\"voltage_pin\":\"A0\",\"voltage_raw\":");
   Serial.print(voltageRaw);
   Serial.print(",\"map_pin\":\"A1\",\"map_raw\":");
   Serial.print(mapRaw);
   Serial.print(",\"tach_pin\":\"D2\",\"tach_pulses\":");
-  Serial.print(pulseCount);
+  Serial.print(tachCounts.accepted);
+  Serial.print(",\"tach_rejected\":");
+  Serial.print(tachCounts.rejected);
   Serial.print(",\"interval_ms\":");
-  Serial.print(REPORT_INTERVAL_MS);
+  Serial.print(intervalMs);
   Serial.println("}");
 }
 
@@ -52,17 +61,19 @@ int readAnalogAverage(int pin) {
   return round(total / (float)SAMPLE_COUNT);
 }
 
-unsigned long readAndResetTachPulseCount() {
+TachCounts readAndResetTachCounts() {
   noInterrupts();
-  const unsigned long count = tachPulseCount;
+  const TachCounts counts = { tachPulseCount, tachRejectedCount };
   tachPulseCount = 0;
+  tachRejectedCount = 0;
   interrupts();
-  return count;
+  return counts;
 }
 
 void countTachPulse() {
   const unsigned long now = micros();
   if (now - lastTachPulseUs < TACH_MIN_PULSE_GAP_US) {
+    tachRejectedCount++;
     return;
   }
 

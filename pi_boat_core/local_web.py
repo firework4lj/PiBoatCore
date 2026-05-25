@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from pathlib import Path
 from typing import Any, Callable
 
 from pi_boat_core.config import LocalWebConfig
@@ -14,6 +15,7 @@ class LocalWebServer:
     def __init__(self, config: LocalWebConfig, engine_provider: EngineProvider) -> None:
         self.config = config
         self.engine_provider = engine_provider
+        self.run_store = EngineRunStore(Path("./engine_runs.json"))
         self._server: asyncio.Server | None = None
 
     async def run_until_stopped(self, stop: asyncio.Event) -> None:
@@ -29,17 +31,41 @@ class LocalWebServer:
             if not request_line:
                 return
 
+            headers: dict[str, str] = {}
             while True:
                 line = await asyncio.wait_for(reader.readline(), timeout=2)
                 if line in (b"\r\n", b"\n", b""):
                     break
+                name, _, value = line.decode("ascii", errors="replace").partition(":")
+                if name and value:
+                    headers[name.strip().lower()] = value.strip()
 
             method, path = _parse_request_line(request_line)
-            if method != "GET":
-                _write_response(writer, 405, "text/plain; charset=utf-8", b"Method not allowed")
-            elif path == "/api/engine":
+            body = b""
+            content_length = int(headers.get("content-length") or 0)
+            if content_length > 0:
+                body = await asyncio.wait_for(reader.readexactly(min(content_length, 1_000_000)), timeout=3)
+
+            if method == "GET" and path == "/api/engine":
                 body = json.dumps(self.engine_provider(), separators=(",", ":")).encode("utf-8")
                 _write_response(writer, 200, "application/json; charset=utf-8", body)
+            elif method == "GET" and path == "/api/engine-runs":
+                body = json.dumps({"runs": self.run_store.list_runs()}, separators=(",", ":")).encode("utf-8")
+                _write_response(writer, 200, "application/json; charset=utf-8", body)
+            elif method == "POST" and path == "/api/engine-runs":
+                try:
+                    run = self.run_store.save(json.loads(body.decode("utf-8")))
+                    response = json.dumps({"status": "saved", "run": run}, separators=(",", ":")).encode("utf-8")
+                    _write_response(writer, 201, "application/json; charset=utf-8", response)
+                except (ValueError, json.JSONDecodeError) as exc:
+                    response = json.dumps({"error": str(exc)}, separators=(",", ":")).encode("utf-8")
+                    _write_response(writer, 400, "application/json; charset=utf-8", response)
+            elif method == "DELETE" and path.startswith("/api/engine-runs/"):
+                run_id = path.rsplit("/", 1)[-1]
+                response = json.dumps(self.run_store.delete(run_id), separators=(",", ":")).encode("utf-8")
+                _write_response(writer, 200, "application/json; charset=utf-8", response)
+            elif method != "GET":
+                _write_response(writer, 405, "text/plain; charset=utf-8", b"Method not allowed")
             elif path == "/" or path == "/engine":
                 _write_response(writer, 200, "text/html; charset=utf-8", ENGINE_PAGE.encode("utf-8"))
             else:
@@ -61,6 +87,8 @@ def _parse_request_line(request_line: bytes) -> tuple[str, str]:
 def _write_response(writer: asyncio.StreamWriter, status: int, content_type: str, body: bytes) -> None:
     reason = {
         200: "OK",
+        201: "Created",
+        400: "Bad Request",
         404: "Not Found",
         405: "Method Not Allowed",
     }.get(status, "OK")
@@ -78,6 +106,113 @@ def _write_response(writer: asyncio.StreamWriter, status: int, content_type: str
         ).encode("ascii")
         + body
     )
+
+
+class EngineRunStore:
+    def __init__(self, path: Path) -> None:
+        self.path = path
+
+    def list_runs(self) -> list[dict[str, Any]]:
+        runs = self._load()
+        runs.sort(key=lambda run: run.get("started_at") or run.get("saved_at") or "", reverse=True)
+        return runs[:50]
+
+    def save(self, payload: dict[str, Any]) -> dict[str, Any]:
+        samples = payload.get("samples")
+        if not isinstance(samples, list) or len(samples) < 2:
+            raise ValueError("run must include at least two samples")
+
+        normalized_samples = [_normalize_run_sample(sample) for sample in samples]
+        normalized_samples = [sample for sample in normalized_samples if sample is not None]
+        if len(normalized_samples) < 2:
+            raise ValueError("run must include at least two valid samples")
+
+        run_id = _safe_run_id(payload.get("id") or f"run-{normalized_samples[0]['timestamp']}")
+        run = {
+            "id": run_id,
+            "name": str(payload.get("name") or "Engine run")[:80],
+            "saved_at": _iso_now(),
+            "started_at": payload.get("started_at") or _timestamp_to_iso(normalized_samples[0]["timestamp"]),
+            "ended_at": payload.get("ended_at") or _timestamp_to_iso(normalized_samples[-1]["timestamp"]),
+            "stats": payload.get("stats") if isinstance(payload.get("stats"), dict) else _run_stats(normalized_samples),
+            "samples": normalized_samples,
+        }
+
+        runs = [existing for existing in self._load() if existing.get("id") != run_id]
+        runs.insert(0, run)
+        self._write(runs[:50])
+        return run
+
+    def delete(self, run_id: str) -> dict[str, Any]:
+        safe_id = _safe_run_id(run_id)
+        runs = self._load()
+        kept = [run for run in runs if run.get("id") != safe_id]
+        self._write(kept)
+        return {"deleted": len(runs) - len(kept)}
+
+    def _load(self) -> list[dict[str, Any]]:
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return []
+        except json.JSONDecodeError:
+            return []
+        return data if isinstance(data, list) else []
+
+    def _write(self, runs: list[dict[str, Any]]) -> None:
+        self.path.write_text(json.dumps(runs, indent=2) + "\n", encoding="utf-8")
+
+
+def _normalize_run_sample(sample: Any) -> dict[str, float] | None:
+    if not isinstance(sample, dict):
+        return None
+    timestamp = _number_or_none(sample.get("timestamp"))
+    if timestamp is None:
+        return None
+    return {
+        "timestamp": timestamp,
+        "rpm": _number_or_none(sample.get("rpm")),
+        "mapKpaAvg": _number_or_none(sample.get("mapKpaAvg")),
+        "loadPercent": _number_or_none(sample.get("loadPercent")),
+        "voltage": _number_or_none(sample.get("voltage")),
+    }
+
+
+def _number_or_none(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    return float(value)
+
+
+def _run_stats(samples: list[dict[str, float]]) -> dict[str, Any]:
+    return {
+        "duration_seconds": round((samples[-1]["timestamp"] - samples[0]["timestamp"]) / 1000, 1),
+        "average_rpm": _average([sample["rpm"] for sample in samples if sample.get("rpm") is not None]),
+        "max_rpm": max((sample["rpm"] for sample in samples if sample.get("rpm") is not None), default=None),
+        "average_map_kpa": _average([sample["mapKpaAvg"] for sample in samples if sample.get("mapKpaAvg") is not None]),
+        "average_load_percent": _average([sample["loadPercent"] for sample in samples if sample.get("loadPercent") is not None]),
+    }
+
+
+def _average(values: list[float]) -> float | None:
+    return round(sum(values) / len(values), 1) if values else None
+
+
+def _safe_run_id(value: Any) -> str:
+    safe = "".join(char if char.isalnum() or char in "._-" else "_" for char in str(value))
+    return safe[:80] or "run"
+
+
+def _iso_now() -> str:
+    from datetime import UTC, datetime
+
+    return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _timestamp_to_iso(timestamp: float) -> str:
+    from datetime import UTC, datetime
+
+    return datetime.fromtimestamp(timestamp / 1000, UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 ENGINE_PAGE = """<!doctype html>
@@ -103,6 +238,14 @@ ENGINE_PAGE = """<!doctype html>
       .bar { height: 9px; border-radius: 99px; background: #173036; overflow: hidden; }
       .bar-fill { width: 0%; height: 100%; border-radius: inherit; background: var(--color); transition: width 120ms linear; }
       .metric-range { display: flex; justify-content: space-between; color: #708681; font-size: 12px; }
+      .run-controls { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; }
+      button { background: #102a32; border: 1px solid #2b555c; border-radius: 7px; color: #eef7f5; cursor: pointer; font: inherit; font-weight: 700; padding: 8px 11px; }
+      button:disabled { cursor: not-allowed; opacity: 0.45; }
+      .run-status { color: #9fb2ae; font-size: 13px; }
+      .saved-runs { display: grid; gap: 8px; margin-top: 10px; }
+      .saved-run { align-items: center; background: #071014; border: 1px solid #214044; border-radius: 7px; display: grid; gap: 8px; grid-template-columns: minmax(0, 1fr) auto auto; padding: 9px; }
+      .saved-run strong, .saved-run small { display: block; min-width: 0; overflow-wrap: anywhere; }
+      .saved-run small { color: #9fb2ae; font-size: 12px; margin-top: 2px; }
       .charts { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(280px, 0.7fr); gap: 10px; }
       .chart-stack { display: grid; gap: 10px; }
       .panel header { margin-bottom: 10px; }
@@ -120,6 +263,7 @@ ENGINE_PAGE = """<!doctype html>
       pre { margin: 0; color: #9fb2ae; white-space: pre-wrap; font-size: 12px; }
       @media (max-width: 900px) { .metrics, .charts, .analysis-grid { grid-template-columns: 1fr 1fr; } .chart-stack { grid-column: 1 / -1; } }
       @media (max-width: 640px) { main { padding: 12px; } .metrics, .charts, .analysis-grid { grid-template-columns: 1fr; } canvas { height: 180px; } }
+      @media (max-width: 640px) { .saved-run { grid-template-columns: 1fr; } }
     </style>
   </head>
   <body>
@@ -128,6 +272,18 @@ ENGINE_PAGE = """<!doctype html>
         <h1>Engine</h1>
         <span id="status">Connecting</span>
       </header>
+      <section class="panel">
+        <header>
+          <h2>Engine Runs</h2>
+          <span class="run-status" id="runStatus">Not recording</span>
+        </header>
+        <div class="run-controls">
+          <button type="button" id="startRunButton">Start Run</button>
+          <button type="button" id="saveRunButton" disabled>Save Run</button>
+          <button type="button" id="discardRunButton" disabled>Discard</button>
+        </div>
+        <div id="savedRuns" class="saved-runs"></div>
+      </section>
       <section class="metrics">
         <div class="metric">
           <span class="metric-label">RPM</span>
@@ -212,11 +368,22 @@ ENGINE_PAGE = """<!doctype html>
         efficiencyHint: document.querySelector("#efficiencyHint"),
         engineWarnings: document.querySelector("#engineWarnings"),
         detail: document.querySelector("#detail"),
+        runStatus: document.querySelector("#runStatus"),
+        startRunButton: document.querySelector("#startRunButton"),
+        saveRunButton: document.querySelector("#saveRunButton"),
+        discardRunButton: document.querySelector("#discardRunButton"),
+        savedRuns: document.querySelector("#savedRuns"),
         compositeChart: document.querySelector("#compositeChart"),
         mapChart: document.querySelector("#mapChart"),
         rpmChart: document.querySelector("#rpmChart"),
       };
       const history = [];
+      let activeRun = null;
+      let reviewSamples = null;
+
+      els.startRunButton.addEventListener("click", startRun);
+      els.saveRunButton.addEventListener("click", saveRun);
+      els.discardRunButton.addEventListener("click", discardRun);
 
       async function refresh() {
         try {
@@ -225,6 +392,9 @@ ENGINE_PAGE = """<!doctype html>
           const sample = normalizeSample(data);
           if (sample.status === "ok") {
             history.push(sample);
+            if (activeRun) {
+              activeRun.samples.push(sample);
+            }
             trimHistory();
           }
           els.status.textContent = data.status === "ok" ? `Live - ${data.last_success_age_seconds ?? 0}s old` : data.error || data.status;
@@ -233,9 +403,120 @@ ENGINE_PAGE = """<!doctype html>
           renderAnalysis(data);
           els.detail.textContent = JSON.stringify(data, null, 2);
           drawCharts();
+          renderRunStatus();
         } catch (error) {
           els.status.textContent = error.message;
         }
+      }
+
+      async function refreshRuns() {
+        try {
+          const response = await fetch("/api/engine-runs", { cache: "no-store" });
+          const data = await response.json();
+          renderSavedRuns(data.runs || []);
+        } catch (error) {
+          els.savedRuns.textContent = error.message;
+        }
+      }
+
+      function startRun() {
+        activeRun = { startedAt: new Date().toISOString(), samples: [] };
+        reviewSamples = null;
+        renderRunStatus();
+      }
+
+      async function saveRun() {
+        if (!activeRun || activeRun.samples.length < 2) {
+          return;
+        }
+        const name = window.prompt("Run name", defaultRunName());
+        if (name === null) {
+          return;
+        }
+        const payload = {
+          id: `run-${Date.now()}`,
+          name: name.trim() || defaultRunName(),
+          started_at: activeRun.startedAt,
+          ended_at: new Date().toISOString(),
+          samples: activeRun.samples,
+          stats: calculateRunStats(activeRun.samples),
+        };
+        const response = await fetch("/api/engine-runs", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (!response.ok) {
+          throw new Error(`Save failed: ${response.status}`);
+        }
+        activeRun = null;
+        renderRunStatus();
+        await refreshRuns();
+      }
+
+      function discardRun() {
+        activeRun = null;
+        renderRunStatus();
+      }
+
+      function renderRunStatus() {
+        if (!activeRun) {
+          els.runStatus.textContent = reviewSamples ? "Reviewing saved run" : "Not recording";
+          els.startRunButton.disabled = false;
+          els.saveRunButton.disabled = true;
+          els.discardRunButton.disabled = true;
+          return;
+        }
+        const duration = activeRun.samples.length
+          ? formatDuration(activeRun.samples.at(-1).timestamp - activeRun.samples[0].timestamp)
+          : "0s";
+        els.runStatus.textContent = `Recording ${duration} / ${activeRun.samples.length} samples`;
+        els.startRunButton.disabled = true;
+        els.saveRunButton.disabled = activeRun.samples.length < 2;
+        els.discardRunButton.disabled = false;
+      }
+
+      function renderSavedRuns(runs) {
+        if (!runs.length) {
+          els.savedRuns.textContent = "No saved engine runs";
+          return;
+        }
+        els.savedRuns.replaceChildren(...runs.map((run) => {
+          const row = document.createElement("div");
+          const meta = document.createElement("div");
+          const title = document.createElement("strong");
+          const detail = document.createElement("small");
+          const review = document.createElement("button");
+          const remove = document.createElement("button");
+          row.className = "saved-run";
+          title.textContent = run.name || "Engine run";
+          detail.textContent = runSummary(run);
+          review.textContent = "Review";
+          remove.textContent = "Delete";
+          review.addEventListener("click", () => {
+            reviewSamples = Array.isArray(run.samples) ? run.samples : [];
+            els.detail.textContent = JSON.stringify(run, null, 2);
+            drawCharts();
+            renderRunStatus();
+          });
+          remove.addEventListener("click", () => deleteRun(run.id));
+          meta.append(title, detail);
+          row.append(meta, review, remove);
+          return row;
+        }));
+      }
+
+      async function deleteRun(id) {
+        if (!window.confirm("Delete saved engine run?")) {
+          return;
+        }
+        await fetch(`/api/engine-runs/${encodeURIComponent(id)}`, { method: "DELETE" });
+        if (reviewSamples) {
+          reviewSamples = null;
+        }
+        await refreshRuns();
+        drawCharts();
+        renderRunStatus();
       }
 
       function renderAnalysis(data) {
@@ -307,10 +588,11 @@ ENGINE_PAGE = """<!doctype html>
       }
 
       function drawCharts() {
-        drawCompositeChart(els.compositeChart, history);
-        drawMetricChart(els.mapChart, history, "mapKpaAvg", "kPa", "#f4c15d", 0, 110);
-        const maxRpm = Math.max(1000, ...history.map((sample) => sample.rpm || 0)) * 1.15;
-        drawMetricChart(els.rpmChart, history, "rpm", "rpm", "#54d6a5", 0, maxRpm);
+        const samples = reviewSamples || history;
+        drawCompositeChart(els.compositeChart, samples);
+        drawMetricChart(els.mapChart, samples, "mapKpaAvg", "kPa", "#f4c15d", 0, 110);
+        const maxRpm = Math.max(1000, ...samples.map((sample) => sample.rpm || 0)) * 1.15;
+        drawMetricChart(els.rpmChart, samples, "rpm", "rpm", "#54d6a5", 0, maxRpm);
       }
 
       function drawCompositeChart(canvas, samples) {
@@ -354,20 +636,19 @@ ENGINE_PAGE = """<!doctype html>
           ctx.lineTo(area.right, y);
           ctx.stroke();
         }
-        const now = Date.now();
-        const range = { start: now - HISTORY_MS, end: now };
+        const range = chartRange(reviewSamples || history);
         drawContent(ctx, area, range);
         ctx.fillStyle = "#8da4a2";
         ctx.font = "12px system-ui";
-        ctx.fillText("-60s", area.left, height - 7);
-        ctx.fillText("now", area.right - 26, height - 7);
+        ctx.fillText(reviewSamples ? "start" : "-60s", area.left, height - 7);
+        ctx.fillText(reviewSamples ? "end" : "now", area.right - 26, height - 7);
       }
 
       function drawSeries(ctx, area, range, samples, item) {
         const points = samples
           .filter((sample) => Number.isFinite(sample[item.key]))
           .map((sample) => ({
-            x: area.left + ((sample.timestamp - range.start) / HISTORY_MS) * (area.right - area.left),
+            x: area.left + ((sample.timestamp - range.start) / Math.max(1, range.end - range.start)) * (area.right - area.left),
             y: area.bottom - ((sample[item.key] - item.min) / Math.max(1, item.max - item.min)) * (area.bottom - area.top),
           }));
         if (points.length < 2) {
@@ -412,7 +693,52 @@ ENGINE_PAGE = """<!doctype html>
         return Math.min(max, Math.max(min, value));
       }
 
+      function chartRange(samples) {
+        if (reviewSamples && samples.length >= 2) {
+          return { start: samples[0].timestamp, end: samples.at(-1).timestamp };
+        }
+        const now = Date.now();
+        return { start: now - HISTORY_MS, end: now };
+      }
+
+      function calculateRunStats(samples) {
+        return {
+          duration_seconds: samples.length >= 2 ? Math.round((samples.at(-1).timestamp - samples[0].timestamp) / 100) / 10 : 0,
+          average_rpm: average(samples.map((sample) => sample.rpm).filter(Number.isFinite)),
+          max_rpm: Math.max(...samples.map((sample) => sample.rpm).filter(Number.isFinite), 0),
+          average_map_kpa: average(samples.map((sample) => sample.mapKpaAvg).filter(Number.isFinite)),
+          average_load_percent: average(samples.map((sample) => sample.loadPercent).filter(Number.isFinite)),
+        };
+      }
+
+      function average(values) {
+        return values.length ? Math.round((values.reduce((sum, value) => sum + value, 0) / values.length) * 10) / 10 : null;
+      }
+
+      function runSummary(run) {
+        const stats = run.stats || {};
+        const parts = [
+          `${formatDuration((stats.duration_seconds || 0) * 1000)}`,
+          Number.isFinite(stats.average_rpm) ? `${Math.round(stats.average_rpm)} rpm avg` : null,
+          Number.isFinite(stats.max_rpm) ? `${Math.round(stats.max_rpm)} rpm max` : null,
+          Number.isFinite(stats.average_map_kpa) ? `${stats.average_map_kpa.toFixed(1)} kPa avg` : null,
+        ].filter(Boolean);
+        return parts.join(" / ");
+      }
+
+      function formatDuration(ms) {
+        const seconds = Math.max(0, Math.round(ms / 1000));
+        const minutes = Math.floor(seconds / 60);
+        const remainder = seconds % 60;
+        return minutes > 0 ? `${minutes}m ${remainder}s` : `${remainder}s`;
+      }
+
+      function defaultRunName() {
+        return new Intl.DateTimeFormat(undefined, { dateStyle: "short", timeStyle: "short" }).format(new Date());
+      }
+
       refresh();
+      refreshRuns();
       setInterval(refresh, 50);
     </script>
   </body>

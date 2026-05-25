@@ -9,7 +9,7 @@ class ArduinoVoltageParserTests(unittest.TestCase):
     def test_parse_voltage_line_reads_uno_payload(self) -> None:
         reading = parse_voltage_line(
             '{"type":"engine_raw","voltage_pin":"A0","voltage_raw":518,'
-            '"map_pin":"A1","map_raw":412,"tach_pin":"D2","tach_pulses":8,"interval_ms":50}'
+            '"map_pin":"A1","map_raw":412,"tach_pin":"D2","tach_pulses":8,"tach_rejected":3,"interval_ms":50}'
         )
 
         self.assertEqual(reading["pin"], "A0")
@@ -24,6 +24,7 @@ class ArduinoVoltageParserTests(unittest.TestCase):
         self.assertAlmostEqual(reading["map_load_percent"], 16.85, places=2)
         self.assertEqual(reading["tach_pin"], "D2")
         self.assertEqual(reading["tach_pulses"], 8)
+        self.assertEqual(reading["tach_rejected"], 3)
         self.assertEqual(reading["tach_interval_ms"], 50)
         self.assertEqual(reading["rpm"], 19200.0)
 
@@ -51,7 +52,7 @@ class ArduinoVoltageParserTests(unittest.TestCase):
         with self.assertRaises(ArduinoVoltageError):
             parse_voltage_line('{"type":"other","voltage":12.0}')
 
-    def test_rolling_rpm_uses_one_second_window(self) -> None:
+    def test_rolling_rpm_uses_stable_window(self) -> None:
         sensor = ArduinoVoltageSensor(
             ArduinoVoltageConfig(
                 enabled=True,
@@ -72,8 +73,41 @@ class ArduinoVoltageParserTests(unittest.TestCase):
 
         self.assertEqual(payload["rpm_instant"], 0.0)
         self.assertEqual(payload["rpm_window"], 600.0)
+        self.assertEqual(payload["rpm_filtered"], 600.0)
         self.assertLess(abs(payload["rpm"] - payload["rpm_window"]), 60)
         self.assertAlmostEqual(payload["rpm_window_seconds"], 1.0)
+
+    def test_rolling_rpm_rejects_impossible_spike(self) -> None:
+        sensor = ArduinoVoltageSensor(
+            ArduinoVoltageConfig(
+                enabled=True,
+                port="/dev/null",
+                baudrate=115200,
+                timeout_seconds=1,
+                max_attempts=1,
+                retry_delay_seconds=0.1,
+            )
+        )
+
+        payload = {}
+        for index in range(40):
+            pulses = 1 if index % 4 == 0 else 0
+            payload = parse_voltage_line(
+                '{"type":"engine_raw","voltage_pin":"A0","voltage_raw":518,'
+                f'"map_pin":"A1","map_raw":412,"tach_pin":"D2","tach_pulses":{pulses},"interval_ms":50}}'
+            )
+            sensor._apply_rolling_rpm(payload, 100.0 + (index * 0.05))
+
+        stable_rpm = payload["rpm"]
+
+        spike = parse_voltage_line(
+            '{"type":"engine_raw","voltage_pin":"A0","voltage_raw":518,'
+            '"map_pin":"A1","map_raw":412,"tach_pin":"D2","tach_pulses":120,"interval_ms":50}'
+        )
+        sensor._apply_rolling_rpm(spike, 102.1)
+
+        self.assertTrue(spike["rpm_rejected"])
+        self.assertEqual(spike["rpm"], stable_rpm)
 
     def test_map_smoothing_publishes_average_and_offset_load(self) -> None:
         sensor = ArduinoVoltageSensor(

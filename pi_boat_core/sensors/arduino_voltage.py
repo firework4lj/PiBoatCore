@@ -5,6 +5,7 @@ import json
 import threading
 import time
 from collections import deque
+from statistics import median
 from typing import Any
 
 from pi_boat_core.config import ArduinoVoltageConfig
@@ -22,8 +23,12 @@ MAP_LOAD_IDLE_KPA = 35.0
 MAP_LOAD_WOT_KPA = 100.0
 MAP_SMOOTHING_ALPHA = 0.18
 SPARKS_PER_REVOLUTION = 0.5
-RPM_WINDOW_SECONDS = 1.0
-RPM_SMOOTHING_ALPHA = 0.25
+RPM_WINDOW_SECONDS = 2.0
+RPM_MIN_WINDOW_SECONDS = 1.0
+RPM_MEDIAN_WINDOW_SECONDS = 2.5
+RPM_SMOOTHING_ALPHA = 0.10
+RPM_MAX_VALID = 5500.0
+RPM_MAX_CHANGE_PER_SECOND = 900.0
 ENGINE_ANALYSIS_WINDOW_SECONDS = 10.0
 ENGINE_RUNNING_RPM = 350.0
 ENGINE_IDLE_RPM = 1100.0
@@ -45,7 +50,9 @@ class ArduinoVoltageSensor(SensorAdapter):
         self._streaming = False
         self._stream_stop = threading.Event()
         self._tach_samples: deque[tuple[float, int, float]] = deque()
+        self._rpm_windows: deque[tuple[float, float]] = deque()
         self._smoothed_rpm: float | None = None
+        self._last_rpm_sampled_at: float | None = None
         self._smoothed_map_kpa: float | None = None
         self._analysis_samples: deque[dict[str, float]] = deque()
 
@@ -200,15 +207,46 @@ class ArduinoVoltageSensor(SensorAdapter):
         total_pulses = sum(sample[1] for sample in self._tach_samples)
         total_interval_ms = sum(sample[2] for sample in self._tach_samples)
         window_rpm = estimate_rpm(total_pulses, total_interval_ms)
+        window_ready = total_interval_ms >= RPM_MIN_WINDOW_SECONDS * 1000.0
+        rpm_rejected = window_ready and window_rpm > RPM_MAX_VALID
+
+        if window_ready and not rpm_rejected:
+            self._rpm_windows.append((sampled_at, window_rpm))
+
+        rpm_cutoff = sampled_at - RPM_MEDIAN_WINDOW_SECONDS
+        while self._rpm_windows and self._rpm_windows[0][0] < rpm_cutoff:
+            self._rpm_windows.popleft()
+
+        filtered_rpm = 0.0
+        if self._rpm_windows:
+            filtered_rpm = float(median(sample[1] for sample in self._rpm_windows))
+        if rpm_rejected and self._smoothed_rpm is not None:
+            filtered_rpm = self._smoothed_rpm
+
         if self._smoothed_rpm is None:
-            self._smoothed_rpm = window_rpm
-        elif window_rpm == 0:
+            self._smoothed_rpm = filtered_rpm
+        elif self._smoothed_rpm == 0 and filtered_rpm > 0:
+            self._smoothed_rpm = filtered_rpm
+        elif filtered_rpm == 0:
             self._smoothed_rpm = 0.0
         else:
-            self._smoothed_rpm = (RPM_SMOOTHING_ALPHA * window_rpm) + ((1 - RPM_SMOOTHING_ALPHA) * self._smoothed_rpm)
+            elapsed = 0.05
+            if self._last_rpm_sampled_at is not None:
+                elapsed = max(0.01, sampled_at - self._last_rpm_sampled_at)
+
+            max_step = RPM_MAX_CHANGE_PER_SECOND * elapsed
+            delta = filtered_rpm - self._smoothed_rpm
+            if abs(delta) > max_step:
+                filtered_rpm = self._smoothed_rpm + (max_step if delta > 0 else -max_step)
+
+            self._smoothed_rpm = (RPM_SMOOTHING_ALPHA * filtered_rpm) + ((1 - RPM_SMOOTHING_ALPHA) * self._smoothed_rpm)
+
+        self._last_rpm_sampled_at = sampled_at
 
         payload["rpm_instant"] = payload.get("rpm")
         payload["rpm_window"] = window_rpm
+        payload["rpm_filtered"] = filtered_rpm
+        payload["rpm_rejected"] = rpm_rejected
         payload["rpm"] = self._smoothed_rpm
         payload["rpm_window_seconds"] = round(total_interval_ms / 1000.0, 3)
 
@@ -315,7 +353,10 @@ def parse_engine_raw_payload(payload: dict[str, Any]) -> dict[str, Any]:
     voltage_raw = _required_number(payload, "voltage_raw")
     map_raw = _required_number(payload, "map_raw")
     tach_pulses = _required_number(payload, "tach_pulses")
+    tach_rejected = payload.get("tach_rejected", 0)
     interval_ms = _required_number(payload, "interval_ms")
+    if isinstance(tach_rejected, bool) or not isinstance(tach_rejected, int | float):
+        tach_rejected = 0
 
     voltage_sensor_volts = adc_to_volts(voltage_raw)
     voltage = voltage_sensor_volts * VOLTAGE_DIVIDER_RATIO * VOLTAGE_CALIBRATION_MULTIPLIER
@@ -336,6 +377,7 @@ def parse_engine_raw_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "map_load_percent": estimate_map_load_percent(map_kpa),
         "tach_pin": payload.get("tach_pin"),
         "tach_pulses": int(tach_pulses),
+        "tach_rejected": int(tach_rejected),
         "tach_interval_ms": float(interval_ms),
         "rpm": rpm,
     }
