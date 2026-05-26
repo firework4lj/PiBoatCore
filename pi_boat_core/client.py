@@ -30,16 +30,7 @@ class TelemetryClient:
             method="POST",
         )
 
-        try:
-            with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
-                if response.status < 200 or response.status >= 300:
-                    raise TelemetryPostError(f"server returned HTTP {response.status}")
-                body = response.read()
-                if not body:
-                    return {}
-                return json.loads(body.decode("utf-8"))
-        except (TimeoutError, urllib.error.URLError, urllib.error.HTTPError) as exc:
-            raise TelemetryPostError(str(exc)) from exc
+        return self._post_json(request)
 
     def post_snapshot(self, *, boat_id: str, device_id: str, sent_at: str, image: bytes) -> None:
         snapshot_url = self.server_url.rsplit("/", 1)[0] + "/snapshot"
@@ -59,12 +50,7 @@ class TelemetryClient:
             method="POST",
         )
 
-        try:
-            with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
-                if response.status < 200 or response.status >= 300:
-                    raise TelemetryPostError(f"server returned HTTP {response.status}")
-        except (TimeoutError, urllib.error.URLError, urllib.error.HTTPError) as exc:
-            raise TelemetryPostError(str(exc)) from exc
+        self._post_empty(request)
 
     def post_audio_event(
         self,
@@ -106,16 +92,7 @@ class TelemetryClient:
             method="POST",
         )
 
-        try:
-            with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
-                if response.status < 200 or response.status >= 300:
-                    raise TelemetryPostError(f"server returned HTTP {response.status}")
-                body = response.read()
-                if not body:
-                    return {}
-                return json.loads(body.decode("utf-8"))
-        except (TimeoutError, urllib.error.URLError, urllib.error.HTTPError) as exc:
-            raise TelemetryPostError(str(exc)) from exc
+        return self._post_json(request)
 
     def post_audio_event_snapshot(
         self,
@@ -144,9 +121,30 @@ class TelemetryClient:
             method="POST",
         )
 
+        self._post_empty(request)
+
+    def _post_json(self, request: urllib.request.Request) -> dict[str, Any]:
         try:
             with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
-                if response.status < 200 or response.status >= 300:
-                    raise TelemetryPostError(f"server returned HTTP {response.status}")
-        except (TimeoutError, urllib.error.URLError, urllib.error.HTTPError) as exc:
+                self._raise_for_status(response.status)
+                body = response.read()
+                if not body:
+                    return {}
+                return json.loads(body.decode("utf-8"))
+        except TelemetryPostError:
+            raise
+        except (TimeoutError, OSError, urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError) as exc:
             raise TelemetryPostError(str(exc)) from exc
+
+    def _post_empty(self, request: urllib.request.Request) -> None:
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
+                self._raise_for_status(response.status)
+        except TelemetryPostError:
+            raise
+        except (TimeoutError, OSError, urllib.error.URLError, urllib.error.HTTPError) as exc:
+            raise TelemetryPostError(str(exc)) from exc
+
+    def _raise_for_status(self, status: int) -> None:
+        if status < 200 or status >= 300:
+            raise TelemetryPostError(f"server returned HTTP {status}")

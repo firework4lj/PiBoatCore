@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import argparse
+import subprocess
 import logging
 import signal
+import time
 from datetime import UTC, datetime
 from typing import Any
 
@@ -26,6 +28,9 @@ from pi_boat_core.spool import TelemetrySpool
 
 LOGGER = logging.getLogger("piboatcore")
 UNDERWAY_SPEED_KNOTS = 1.0
+NETWORK_RECOVERY_FAILURE_THRESHOLD = 5
+NETWORK_RECOVERY_COOLDOWN_SECONDS = 300
+CELLULAR_CONNECTION_NAME = "sim7600-usb0"
 
 
 class BoatTelemetryService:
@@ -48,6 +53,8 @@ class BoatTelemetryService:
         self._live_snapshot_interval_seconds = 2.0
         self._snapshot_requested = False
         self._last_snapshot_request_id: str | None = None
+        self._consecutive_upload_failures = 0
+        self._last_network_recovery_monotonic = 0.0
 
     def stop(self) -> None:
         self._stop.set()
@@ -78,7 +85,10 @@ class BoatTelemetryService:
 
     async def run_heartbeats(self) -> None:
         while not self._stop.is_set():
-            await self.tick()
+            try:
+                await self.tick()
+            except Exception:
+                LOGGER.exception("telemetry tick failed; will retry")
 
             try:
                 await asyncio.wait_for(
@@ -179,19 +189,61 @@ class BoatTelemetryService:
             try:
                 await asyncio.to_thread(self.client.post_heartbeat, item.payload)
                 self.spool.delete(item.id)
+                self._record_upload_success()
                 LOGGER.info("flushed queued heartbeat id=%s", item.id)
             except TelemetryPostError:
+                await self._record_upload_failure()
                 LOGGER.warning("server unavailable; keeping queued heartbeats")
                 return
 
     async def post_or_spool(self, payload: dict[str, Any]) -> None:
         try:
             response = await asyncio.to_thread(self.client.post_heartbeat, payload)
+            self._record_upload_success()
             self.apply_server_commands(response)
             LOGGER.info("sent heartbeat sequence=%s", _payload_sequence(payload))
         except TelemetryPostError as exc:
             self.spool.enqueue(payload)
+            await self._record_upload_failure()
             LOGGER.warning("queued heartbeat sequence=%s error=%s", _payload_sequence(payload), exc)
+
+    def _record_upload_success(self) -> None:
+        if self._consecutive_upload_failures:
+            LOGGER.info("server upload recovered after %s failures", self._consecutive_upload_failures)
+        self._consecutive_upload_failures = 0
+
+    async def _record_upload_failure(self) -> None:
+        self._consecutive_upload_failures += 1
+        await self._maybe_recover_network_connectivity()
+
+    async def _maybe_recover_network_connectivity(self) -> None:
+        if self._consecutive_upload_failures < NETWORK_RECOVERY_FAILURE_THRESHOLD:
+            return
+
+        now = time.monotonic()
+        if now - self._last_network_recovery_monotonic < NETWORK_RECOVERY_COOLDOWN_SECONDS:
+            return
+
+        self._last_network_recovery_monotonic = now
+        LOGGER.warning(
+            "server uploads failed %s times; attempting cellular recovery",
+            self._consecutive_upload_failures,
+        )
+
+        await self._recover_modem_sensors()
+        messages = await asyncio.to_thread(restart_usb_cellular_connection)
+        for message in messages:
+            LOGGER.warning("cellular recovery: %s", message)
+
+    async def _recover_modem_sensors(self) -> None:
+        for sensor in self.sensors:
+            recover = getattr(sensor, "recover_connectivity", None)
+            if not callable(recover):
+                continue
+            try:
+                await recover()
+            except Exception:
+                LOGGER.exception("sensor connectivity recovery failed: %s", getattr(sensor, "name", "unknown"))
 
     async def capture_and_post_snapshot(self) -> bool:
         sent_at = utc_now_iso()
@@ -334,6 +386,37 @@ def build_default_service(config: Config) -> BoatTelemetryService:
         spool=TelemetrySpool(config.spool_db_path),
         sensors=sensors,
     )
+
+
+def restart_usb_cellular_connection() -> list[str]:
+    commands = [
+        ["nmcli", "connection", "down", CELLULAR_CONNECTION_NAME],
+        ["nmcli", "connection", "up", CELLULAR_CONNECTION_NAME],
+    ]
+    messages: list[str] = []
+
+    for command in commands:
+        try:
+            completed = subprocess.run(
+                command,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=45,
+            )
+        except FileNotFoundError:
+            return ["nmcli not found; cannot restart NetworkManager cellular connection"]
+        except subprocess.TimeoutExpired:
+            messages.append(f"{' '.join(command)} timed out")
+            continue
+
+        output = (completed.stdout or completed.stderr).strip()
+        if completed.returncode == 0:
+            messages.append(f"{' '.join(command)} ok" + (f": {output}" if output else ""))
+        else:
+            messages.append(f"{' '.join(command)} failed rc={completed.returncode}" + (f": {output}" if output else ""))
+
+    return messages
 
 
 def _payload_sequence(payload: dict[str, Any]) -> Any:

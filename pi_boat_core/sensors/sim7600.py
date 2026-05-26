@@ -54,6 +54,9 @@ class Sim7600Sensor(SensorAdapter):
     async def read(self) -> dict[str, Any]:
         return await asyncio.to_thread(self._read_sync)
 
+    async def recover_connectivity(self) -> None:
+        await asyncio.to_thread(self._reset_modem)
+
     def _read_sync(self) -> dict[str, Any]:
         attempts = max(1, self.config.max_attempts)
         last_error: Exception | None = None

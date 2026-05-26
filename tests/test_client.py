@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from pi_boat_core.client import TelemetryClient
+from pi_boat_core.client import TelemetryClient, TelemetryPostError
 
 
 class TelemetryClientTests(unittest.TestCase):
@@ -37,6 +37,28 @@ class TelemetryClientTests(unittest.TestCase):
         self.assertEqual(captured["authorization"], "Bearer secret-token")
         self.assertEqual(captured["timeout"], 5)
         self.assertEqual(response["status"], "accepted")
+
+    def test_post_heartbeat_wraps_invalid_server_json_as_retryable_error(self) -> None:
+        class Response:
+            status = 202
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return None
+
+            def read(self):
+                return b"<html>not json</html>"
+
+        client = TelemetryClient(
+            server_url="http://example.test/api/heartbeat",
+            timeout_seconds=5,
+        )
+
+        with patch("urllib.request.urlopen", return_value=Response()):
+            with self.assertRaises(TelemetryPostError):
+                client.post_heartbeat({"status": "ok"})
 
     def test_post_snapshot_posts_jpeg_to_snapshot_endpoint(self) -> None:
         captured = {}
