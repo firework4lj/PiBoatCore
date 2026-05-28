@@ -14,7 +14,7 @@ from pi_boat_core.sensors.base import SensorAdapter
 ADC_REFERENCE_VOLTS = 5.0
 ADC_MAX_RAW = 1023.0
 VOLTAGE_DIVIDER_RATIO = 5.0
-VOLTAGE_CALIBRATION_MULTIPLIER = 1.0
+VOLTAGE_CALIBRATION_MULTIPLIER = 0.75
 MAP_MIN_VOLTS = 0.50
 MAP_MAX_VOLTS = 4.50
 MAP_MIN_KPA = 10.0
@@ -22,7 +22,9 @@ MAP_MAX_KPA = 105.0
 MAP_LOAD_IDLE_KPA = 35.0
 MAP_LOAD_WOT_KPA = 100.0
 MAP_SMOOTHING_ALPHA = 0.18
-SPARKS_PER_REVOLUTION = 0.5
+# Calibrated to the inductive plug-wire pickup. A single cylinder on a 4-stroke
+# would ideally be 0.5, but this pickup sees multiple edges per spark event.
+SPARKS_PER_REVOLUTION = 2.0
 RPM_WINDOW_SECONDS = 2.0
 RPM_MIN_WINDOW_SECONDS = 1.0
 RPM_MEDIAN_WINDOW_SECONDS = 2.5

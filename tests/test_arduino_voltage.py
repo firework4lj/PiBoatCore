@@ -27,7 +27,7 @@ class ArduinoVoltageParserTests(unittest.TestCase):
         self.assertEqual(reading["tach_pulses"], 8)
         self.assertEqual(reading["tach_rejected"], 3)
         self.assertEqual(reading["tach_interval_ms"], 50)
-        self.assertEqual(reading["rpm"], 19200.0)
+        self.assertEqual(reading["rpm"], 4800.0)
 
     def test_parse_voltage_line_keeps_raw_voltage_fallback_for_old_uno_payload(self) -> None:
         reading = parse_voltage_line(
@@ -35,8 +35,8 @@ class ArduinoVoltageParserTests(unittest.TestCase):
             '"map_pin":"A1","map_raw":412,"tach_pin":"D2","tach_pulses":8,"tach_rejected":3,"interval_ms":50}'
         )
 
-        self.assertAlmostEqual(reading["voltage"], 12.658847, places=5)
-        self.assertEqual(reading["soc_estimate_percent"], 90)
+        self.assertAlmostEqual(reading["voltage"], 9.494135, places=5)
+        self.assertEqual(reading["soc_estimate_percent"], 0)
 
     def test_parse_voltage_line_infers_charging_when_missing(self) -> None:
         reading = parse_voltage_line('{"type":"battery_voltage","voltage":13.8}')
@@ -82,8 +82,8 @@ class ArduinoVoltageParserTests(unittest.TestCase):
             sensor._apply_rolling_rpm(payload, 100.0 + (index * 0.05))
 
         self.assertEqual(payload["rpm_instant"], 0.0)
-        self.assertEqual(payload["rpm_window"], 600.0)
-        self.assertEqual(payload["rpm_filtered"], 600.0)
+        self.assertEqual(payload["rpm_window"], 150.0)
+        self.assertEqual(payload["rpm_filtered"], 150.0)
         self.assertLess(abs(payload["rpm"] - payload["rpm_window"]), 60)
         self.assertAlmostEqual(payload["rpm_window_seconds"], 1.0)
 
@@ -112,7 +112,7 @@ class ArduinoVoltageParserTests(unittest.TestCase):
 
         spike = parse_voltage_line(
             '{"type":"engine_raw","voltage_pin":"A0","voltage_raw":518,'
-            '"map_pin":"A1","map_raw":412,"tach_pin":"D2","tach_pulses":120,"interval_ms":50}'
+            '"map_pin":"A1","map_raw":412,"tach_pin":"D2","tach_pulses":400,"interval_ms":50}'
         )
         sensor._apply_rolling_rpm(spike, 102.1)
 

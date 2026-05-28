@@ -11,7 +11,7 @@ const unsigned long TACH_MIN_PULSE_GAP_US = 8000;
 // set CALIBRATION_MULTIPLIER to 12.60 / 12.40 = 1.0161.
 const float ADC_REFERENCE_VOLTS = 5.0;
 const float DIVIDER_RATIO = 5.0;
-const float CALIBRATION_MULTIPLIER = 1.0;
+const float CALIBRATION_MULTIPLIER = 0.75;
 
 struct TachCounts {
   unsigned long accepted;
