@@ -1,13 +1,16 @@
 # Arduino Uno Voltage Sensor
 
-Reads a common 0-25V Arduino voltage sensor module on `A1` and prints one JSON
-line per second over USB serial at `115200` baud.
+Reads a common 0-25V Arduino voltage sensor module on `A0`, a MAP sensor on
+`A1`, and a tach pickup on `D2`. It prints one JSON line every 50ms over USB
+serial at `115200` baud.
 
 ## Wiring
 
 - Sensor `+` / `VCC` -> Arduino `5V`
 - Sensor `-` / `GND` -> Arduino `GND`
-- Sensor `S` / output -> Arduino `A1`
+- Voltage sensor `S` / output -> Arduino `A0`
+- MAP sensor output -> Arduino `A1`
+- Tach pickup -> Arduino `D2`
 - Battery positive -> sensor voltage input `+`
 - Battery negative -> sensor voltage input `-`
 
@@ -17,7 +20,7 @@ wire to the helm.
 ## Output
 
 ```json
-{"type":"battery_voltage","pin":"A1","voltage":12.647,"charging":false,"soc_estimate_percent":90}
+{"type":"engine_raw","voltage_pin":"A0","voltage_raw":518,"voltage":12.647,"charging":false,"soc_estimate_percent":90,"map_pin":"A1","map_raw":412,"tach_pin":"D2","tach_pulses":1,"tach_rejected":0,"interval_ms":50}
 ```
 
 ## Calibration

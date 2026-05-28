@@ -358,8 +358,18 @@ def parse_engine_raw_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if isinstance(tach_rejected, bool) or not isinstance(tach_rejected, int | float):
         tach_rejected = 0
 
-    voltage_sensor_volts = adc_to_volts(voltage_raw)
-    voltage = voltage_sensor_volts * VOLTAGE_DIVIDER_RATIO * VOLTAGE_CALIBRATION_MULTIPLIER
+    voltage = payload.get("voltage")
+    if isinstance(voltage, bool) or not isinstance(voltage, int | float):
+        voltage_sensor_volts = adc_to_volts(voltage_raw)
+        voltage = voltage_sensor_volts * VOLTAGE_DIVIDER_RATIO * VOLTAGE_CALIBRATION_MULTIPLIER
+    voltage = float(voltage)
+    charging = payload.get("charging")
+    if not isinstance(charging, bool):
+        charging = voltage >= 13.2
+    soc_estimate = payload.get("soc_estimate_percent")
+    if isinstance(soc_estimate, bool) or not isinstance(soc_estimate, int | float):
+        soc_estimate = estimate_lead_acid_soc(voltage)
+
     map_voltage = adc_to_volts(map_raw)
     map_kpa = estimate_map_kpa(map_voltage)
     rpm = estimate_rpm(tach_pulses, interval_ms)
@@ -368,8 +378,8 @@ def parse_engine_raw_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "pin": payload.get("voltage_pin"),
         "voltage_raw": int(voltage_raw),
         "voltage": voltage,
-        "charging": voltage >= 13.2,
-        "soc_estimate_percent": estimate_lead_acid_soc(voltage),
+        "charging": charging,
+        "soc_estimate_percent": int(soc_estimate),
         "map_pin": payload.get("map_pin"),
         "map_raw": int(map_raw),
         "map_voltage": map_voltage,
