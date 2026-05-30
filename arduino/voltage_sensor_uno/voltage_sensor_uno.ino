@@ -4,7 +4,7 @@ const int TACH_PIN = 2;
 
 const int SAMPLE_COUNT = 5;
 const unsigned long REPORT_INTERVAL_MS = 50;
-const unsigned long TACH_MIN_PULSE_GAP_US = 8000;
+const unsigned long TACH_MIN_PULSE_GAP_US = 3000;
 
 // Most common "0-25V" Arduino voltage sensor modules use a 5:1 divider.
 // If a multimeter says the battery is 12.60V but this reports 12.40V,
