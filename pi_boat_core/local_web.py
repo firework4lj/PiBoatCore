@@ -369,6 +369,7 @@ ENGINE_PAGE = """<!doctype html>
             <div class="raw-stat"><span>Rejected / 50ms</span><strong id="tachRejectedValue">--</strong></div>
             <div class="raw-stat"><span>Instant RPM</span><strong id="rpmInstantValue">--</strong></div>
             <div class="raw-stat"><span>Window RPM</span><strong id="rpmWindowValue">--</strong></div>
+            <div class="raw-stat"><span>Tach Noise</span><strong id="tachNoiseValue">--</strong></div>
           </div>
           <canvas id="tachRawChart" width="900" height="260"></canvas>
         </div>
@@ -449,6 +450,7 @@ ENGINE_PAGE = """<!doctype html>
         tachRejectedValue: document.querySelector("#tachRejectedValue"),
         rpmInstantValue: document.querySelector("#rpmInstantValue"),
         rpmWindowValue: document.querySelector("#rpmWindowValue"),
+        tachNoiseValue: document.querySelector("#tachNoiseValue"),
       };
       const history = [];
       let activeRun = null;
@@ -735,6 +737,7 @@ ENGINE_PAGE = """<!doctype html>
         els.tachRejectedValue.textContent = Number.isFinite(sample.tachRejected) ? sample.tachRejected.toFixed(0) : "--";
         els.rpmInstantValue.textContent = Number.isFinite(sample.rpmInstant) ? sample.rpmInstant.toFixed(0) : "--";
         els.rpmWindowValue.textContent = Number.isFinite(sample.rpmWindow) ? sample.rpmWindow.toFixed(0) : "--";
+        els.tachNoiseValue.textContent = sample.tachNoise ? "YES" : "no";
       }
 
       function normalizeSample(data) {
@@ -752,6 +755,7 @@ ENGINE_PAGE = """<!doctype html>
           tachPulses: finiteOrNull(Number(data.tach_pulses)),
           tachRejected: finiteOrNull(Number(data.tach_rejected)),
           tachIntervalMs: finiteOrNull(Number(data.tach_interval_ms)),
+          tachNoise: Boolean(data.tach_noise),
           mapKpa: finiteOrNull(mapKpa),
           mapKpaAvg: Number.isFinite(mapKpaAvg) ? mapKpaAvg : finiteOrNull(mapKpa),
           loadPercent: Number.isFinite(loadPercent) ? loadPercent : estimateLoadPercent(mapKpaAvg || mapKpa),

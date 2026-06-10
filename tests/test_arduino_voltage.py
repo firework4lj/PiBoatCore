@@ -119,6 +119,29 @@ class ArduinoVoltageParserTests(unittest.TestCase):
         self.assertTrue(spike["rpm_rejected"])
         self.assertEqual(spike["rpm"], stable_rpm)
 
+    def test_rolling_rpm_suppresses_engine_off_tach_noise(self) -> None:
+        sensor = ArduinoVoltageSensor(
+            ArduinoVoltageConfig(
+                enabled=True,
+                port="/dev/null",
+                baudrate=115200,
+                timeout_seconds=1,
+                max_attempts=1,
+                retry_delay_seconds=0.1,
+            )
+        )
+        payload = parse_voltage_line(
+            '{"type":"engine_raw","voltage_pin":"A0","voltage_raw":518,'
+            '"map_pin":"A1","map_raw":1010,"tach_pin":"D2","tach_pulses":4,'
+            '"tach_rejected":671,"interval_ms":50}'
+        )
+
+        sensor._apply_rolling_rpm(payload, 100.0)
+
+        self.assertTrue(payload["tach_noise"])
+        self.assertGreater(payload["rpm_instant"], 0)
+        self.assertEqual(payload["rpm"], 0.0)
+
     def test_map_smoothing_publishes_average_and_offset_load(self) -> None:
         sensor = ArduinoVoltageSensor(
             ArduinoVoltageConfig(

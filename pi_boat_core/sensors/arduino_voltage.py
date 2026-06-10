@@ -31,6 +31,9 @@ RPM_MEDIAN_WINDOW_SECONDS = 2.5
 RPM_SMOOTHING_ALPHA = 0.18
 RPM_MAX_VALID = 5500.0
 RPM_MAX_CHANGE_PER_SECOND = 2500.0
+TACH_NOISE_ENGINE_OFF_MAP_KPA = 85.0
+TACH_NOISE_REJECTED_THRESHOLD = 50
+TACH_NOISE_MAX_ACCEPTED_PULSES = 12
 ENGINE_ANALYSIS_WINDOW_SECONDS = 10.0
 ENGINE_RUNNING_RPM = 350.0
 ENGINE_IDLE_RPM = 1100.0
@@ -201,6 +204,21 @@ class ArduinoVoltageSensor(SensorAdapter):
         if not isinstance(tach_pulses, int | float) or not isinstance(interval_ms, int | float):
             return
 
+        raw_rpm = payload.get("rpm")
+        if is_tach_noise_while_engine_off(payload):
+            self._tach_samples.clear()
+            self._rpm_windows.clear()
+            self._smoothed_rpm = 0.0
+            self._last_rpm_sampled_at = sampled_at
+            payload["rpm_instant"] = raw_rpm
+            payload["rpm_window"] = 0.0
+            payload["rpm_filtered"] = 0.0
+            payload["rpm_rejected"] = True
+            payload["tach_noise"] = True
+            payload["rpm"] = 0.0
+            payload["rpm_window_seconds"] = 0.0
+            return
+
         self._tach_samples.append((sampled_at, int(tach_pulses), float(interval_ms)))
         cutoff = sampled_at - RPM_WINDOW_SECONDS
         while self._tach_samples and self._tach_samples[0][0] < cutoff:
@@ -245,10 +263,11 @@ class ArduinoVoltageSensor(SensorAdapter):
 
         self._last_rpm_sampled_at = sampled_at
 
-        payload["rpm_instant"] = payload.get("rpm")
+        payload["rpm_instant"] = raw_rpm
         payload["rpm_window"] = window_rpm
         payload["rpm_filtered"] = filtered_rpm
         payload["rpm_rejected"] = rpm_rejected
+        payload["tach_noise"] = False
         payload["rpm"] = self._smoothed_rpm
         payload["rpm_window_seconds"] = round(total_interval_ms / 1000.0, 3)
 
@@ -424,6 +443,20 @@ def estimate_rpm(pulse_count: float, interval_ms: float) -> float:
         return 0.0
     pulses_per_second = pulse_count * (1000.0 / interval_ms)
     return (pulses_per_second * 60.0) / SPARKS_PER_REVOLUTION
+
+
+def is_tach_noise_while_engine_off(payload: dict[str, Any]) -> bool:
+    map_kpa = payload.get("map_kpa")
+    tach_rejected = payload.get("tach_rejected")
+    tach_pulses = payload.get("tach_pulses")
+    return (
+        isinstance(map_kpa, int | float)
+        and isinstance(tach_rejected, int | float)
+        and isinstance(tach_pulses, int | float)
+        and map_kpa >= TACH_NOISE_ENGINE_OFF_MAP_KPA
+        and tach_rejected >= TACH_NOISE_REJECTED_THRESHOLD
+        and tach_pulses <= TACH_NOISE_MAX_ACCEPTED_PULSES
+    )
 
 
 def estimate_lead_acid_soc(voltage: float) -> int:
