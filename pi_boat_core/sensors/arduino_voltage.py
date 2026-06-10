@@ -379,11 +379,19 @@ def parse_engine_raw_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if isinstance(tach_rejected, bool) or not isinstance(tach_rejected, int | float):
         tach_rejected = 0
 
-    voltage = payload.get("voltage")
-    if isinstance(voltage, bool) or not isinstance(voltage, int | float):
-        voltage_sensor_volts = adc_to_volts(voltage_raw)
-        voltage = voltage_sensor_volts * VOLTAGE_DIVIDER_RATIO * VOLTAGE_CALIBRATION_MULTIPLIER
-    voltage = float(voltage)
+    voltage_sensor_volts = adc_to_volts(voltage_raw)
+    voltage_from_raw = voltage_sensor_volts * VOLTAGE_DIVIDER_RATIO * VOLTAGE_CALIBRATION_MULTIPLIER
+    reported_voltage = payload.get("voltage")
+    voltage_source = "raw_calculated"
+    if not isinstance(reported_voltage, bool) and isinstance(reported_voltage, int | float):
+        voltage = float(reported_voltage)
+        voltage_source = "arduino"
+        if abs(voltage - voltage_from_raw) > 1.0:
+            voltage = voltage_from_raw
+            voltage_source = "raw_calculated"
+    else:
+        voltage = voltage_from_raw
+
     charging = payload.get("charging")
     if not isinstance(charging, bool):
         charging = voltage >= 13.2
@@ -398,6 +406,8 @@ def parse_engine_raw_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return {
         "pin": payload.get("voltage_pin"),
         "voltage_raw": int(voltage_raw),
+        "voltage_sensor_volts": voltage_sensor_volts,
+        "voltage_source": voltage_source,
         "voltage": voltage,
         "charging": charging,
         "soc_estimate_percent": int(soc_estimate),

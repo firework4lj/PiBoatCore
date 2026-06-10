@@ -370,6 +370,9 @@ ENGINE_PAGE = """<!doctype html>
             <div class="raw-stat"><span>Instant RPM</span><strong id="rpmInstantValue">--</strong></div>
             <div class="raw-stat"><span>Window RPM</span><strong id="rpmWindowValue">--</strong></div>
             <div class="raw-stat"><span>Tach Noise</span><strong id="tachNoiseValue">--</strong></div>
+            <div class="raw-stat"><span>Voltage Raw</span><strong id="voltageRawValue">--</strong></div>
+            <div class="raw-stat"><span>A0 Volts</span><strong id="voltageSensorValue">--</strong></div>
+            <div class="raw-stat"><span>Voltage Source</span><strong id="voltageSourceValue">--</strong></div>
           </div>
           <canvas id="tachRawChart" width="900" height="260"></canvas>
         </div>
@@ -451,6 +454,9 @@ ENGINE_PAGE = """<!doctype html>
         rpmInstantValue: document.querySelector("#rpmInstantValue"),
         rpmWindowValue: document.querySelector("#rpmWindowValue"),
         tachNoiseValue: document.querySelector("#tachNoiseValue"),
+        voltageRawValue: document.querySelector("#voltageRawValue"),
+        voltageSensorValue: document.querySelector("#voltageSensorValue"),
+        voltageSourceValue: document.querySelector("#voltageSourceValue"),
       };
       const history = [];
       let activeRun = null;
@@ -738,6 +744,9 @@ ENGINE_PAGE = """<!doctype html>
         els.rpmInstantValue.textContent = Number.isFinite(sample.rpmInstant) ? sample.rpmInstant.toFixed(0) : "--";
         els.rpmWindowValue.textContent = Number.isFinite(sample.rpmWindow) ? sample.rpmWindow.toFixed(0) : "--";
         els.tachNoiseValue.textContent = sample.tachNoise ? "YES" : "no";
+        els.voltageRawValue.textContent = Number.isFinite(sample.voltageRaw) ? sample.voltageRaw.toFixed(0) : "--";
+        els.voltageSensorValue.textContent = Number.isFinite(sample.voltageSensorVolts) ? `${sample.voltageSensorVolts.toFixed(2)} V` : "--";
+        els.voltageSourceValue.textContent = sample.voltageSource || "--";
       }
 
       function normalizeSample(data) {
@@ -756,6 +765,9 @@ ENGINE_PAGE = """<!doctype html>
           tachRejected: finiteOrNull(Number(data.tach_rejected)),
           tachIntervalMs: finiteOrNull(Number(data.tach_interval_ms)),
           tachNoise: Boolean(data.tach_noise),
+          voltageRaw: finiteOrNull(Number(data.voltage_raw)),
+          voltageSensorVolts: finiteOrNull(Number(data.voltage_sensor_volts)),
+          voltageSource: typeof data.voltage_source === "string" ? data.voltage_source : null,
           mapKpa: finiteOrNull(mapKpa),
           mapKpaAvg: Number.isFinite(mapKpaAvg) ? mapKpaAvg : finiteOrNull(mapKpa),
           loadPercent: Number.isFinite(loadPercent) ? loadPercent : estimateLoadPercent(mapKpaAvg || mapKpa),
