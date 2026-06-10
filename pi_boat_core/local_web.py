@@ -172,6 +172,11 @@ def _normalize_run_sample(sample: Any) -> dict[str, float] | None:
     return {
         "timestamp": timestamp,
         "rpm": _number_or_none(sample.get("rpm")),
+        "rpmInstant": _number_or_none(sample.get("rpmInstant")),
+        "rpmWindow": _number_or_none(sample.get("rpmWindow")),
+        "tachPulses": _number_or_none(sample.get("tachPulses")),
+        "tachRejected": _number_or_none(sample.get("tachRejected")),
+        "tachIntervalMs": _number_or_none(sample.get("tachIntervalMs")),
         "mapKpaAvg": _number_or_none(sample.get("mapKpaAvg")),
         "loadPercent": _number_or_none(sample.get("loadPercent")),
         "voltage": _number_or_none(sample.get("voltage")),
@@ -269,11 +274,16 @@ ENGINE_PAGE = """<!doctype html>
       .analysis-card { border: 1px solid #214044; border-radius: 8px; padding: 12px; background: #071014; }
       .analysis-card span { display: block; color: #8da4a2; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; }
       .analysis-card strong { display: block; margin-top: 6px; font-size: 20px; }
+      .raw-grid { display: grid; gap: 10px; grid-template-columns: 280px minmax(0, 1fr); }
+      .raw-stats { display: grid; gap: 8px; }
+      .raw-stat { border: 1px solid #214044; border-radius: 8px; padding: 10px; background: #071014; }
+      .raw-stat span { display: block; color: #8da4a2; font-size: 11px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }
+      .raw-stat strong { display: block; font-size: 24px; margin-top: 4px; }
       .analysis strong { font-size: 20px; }
       .analysis p { margin: 0; color: #9fb2ae; line-height: 1.35; }
       pre { margin: 0; color: #9fb2ae; white-space: pre-wrap; font-size: 12px; }
       @media (max-width: 900px) { .metrics, .charts, .analysis-grid { grid-template-columns: 1fr 1fr; } .chart-stack { grid-column: 1 / -1; } }
-      @media (max-width: 640px) { main { padding: 12px; } .metrics, .charts, .analysis-grid, .tune-stats { grid-template-columns: 1fr; } canvas { height: 180px; } }
+      @media (max-width: 640px) { main { padding: 12px; } .metrics, .charts, .analysis-grid, .tune-stats, .raw-grid { grid-template-columns: 1fr; } canvas { height: 180px; } }
       @media (max-width: 640px) { .saved-run { grid-template-columns: 1fr; } }
     </style>
   </head>
@@ -342,6 +352,25 @@ ENGINE_PAGE = """<!doctype html>
             <header><h2>RPM</h2></header>
             <canvas id="rpmChart" width="420" height="160"></canvas>
           </div>
+        </div>
+      </section>
+      <section class="panel">
+        <header>
+          <h2>Raw Tach - Last Minute</h2>
+          <div class="legend">
+            <span style="--color:#54d6a5">Accepted pulses</span>
+            <span style="--color:#e97b68">Rejected pulses</span>
+            <span style="--color:#66a8ff">RPM from pulses</span>
+          </div>
+        </header>
+        <div class="raw-grid">
+          <div class="raw-stats">
+            <div class="raw-stat"><span>Accepted / 50ms</span><strong id="tachPulsesValue">--</strong></div>
+            <div class="raw-stat"><span>Rejected / 50ms</span><strong id="tachRejectedValue">--</strong></div>
+            <div class="raw-stat"><span>Instant RPM</span><strong id="rpmInstantValue">--</strong></div>
+            <div class="raw-stat"><span>Window RPM</span><strong id="rpmWindowValue">--</strong></div>
+          </div>
+          <canvas id="tachRawChart" width="900" height="260"></canvas>
         </div>
       </section>
       <section class="panel analysis">
@@ -415,6 +444,11 @@ ENGINE_PAGE = """<!doctype html>
         compositeChart: document.querySelector("#compositeChart"),
         mapChart: document.querySelector("#mapChart"),
         rpmChart: document.querySelector("#rpmChart"),
+        tachRawChart: document.querySelector("#tachRawChart"),
+        tachPulsesValue: document.querySelector("#tachPulsesValue"),
+        tachRejectedValue: document.querySelector("#tachRejectedValue"),
+        rpmInstantValue: document.querySelector("#rpmInstantValue"),
+        rpmWindowValue: document.querySelector("#rpmWindowValue"),
       };
       const history = [];
       let activeRun = null;
@@ -440,7 +474,8 @@ ENGINE_PAGE = """<!doctype html>
             trimHistory();
           }
           els.status.textContent = data.status === "ok" ? `Live - ${data.last_success_age_seconds ?? 0}s old` : data.error || data.status;
-          renderMetrics(sample);
+        renderMetrics(sample);
+          renderRawTach(sample);
           els.mapState.textContent = describeMapState(sample);
           renderAnalysis(data);
           els.detail.textContent = JSON.stringify(data, null, 2);
@@ -695,6 +730,13 @@ ENGINE_PAGE = """<!doctype html>
         barElement.style.width = `${ratio * 100}%`;
       }
 
+      function renderRawTach(sample) {
+        els.tachPulsesValue.textContent = Number.isFinite(sample.tachPulses) ? sample.tachPulses.toFixed(0) : "--";
+        els.tachRejectedValue.textContent = Number.isFinite(sample.tachRejected) ? sample.tachRejected.toFixed(0) : "--";
+        els.rpmInstantValue.textContent = Number.isFinite(sample.rpmInstant) ? sample.rpmInstant.toFixed(0) : "--";
+        els.rpmWindowValue.textContent = Number.isFinite(sample.rpmWindow) ? sample.rpmWindow.toFixed(0) : "--";
+      }
+
       function normalizeSample(data) {
         const mapKpa = Number(data.map_kpa);
         const mapKpaAvg = Number(data.map_kpa_avg);
@@ -705,6 +747,11 @@ ENGINE_PAGE = """<!doctype html>
           rpm: finiteOrNull(Number(data.rpm)),
           rpmWindow: finiteOrNull(Number(data.rpm_window)),
           rpmInstant: finiteOrNull(Number(data.rpm_instant)),
+          rpmFiltered: finiteOrNull(Number(data.rpm_filtered)),
+          rpmRejected: Boolean(data.rpm_rejected),
+          tachPulses: finiteOrNull(Number(data.tach_pulses)),
+          tachRejected: finiteOrNull(Number(data.tach_rejected)),
+          tachIntervalMs: finiteOrNull(Number(data.tach_interval_ms)),
           mapKpa: finiteOrNull(mapKpa),
           mapKpaAvg: Number.isFinite(mapKpaAvg) ? mapKpaAvg : finiteOrNull(mapKpa),
           loadPercent: Number.isFinite(loadPercent) ? loadPercent : estimateLoadPercent(mapKpaAvg || mapKpa),
@@ -745,6 +792,7 @@ ENGINE_PAGE = """<!doctype html>
         drawMetricChart(els.mapChart, samples, "mapKpaAvg", "kPa", "#f4c15d", 0, 110);
         const maxRpm = Math.max(1000, ...samples.map((sample) => sample.rpm || 0)) * 1.15;
         drawMetricChart(els.rpmChart, samples, "rpm", "rpm", "#54d6a5", 0, maxRpm);
+        drawRawTachChart(els.tachRawChart, samples);
       }
 
       function drawCompositeChart(canvas, samples) {
@@ -765,6 +813,37 @@ ENGINE_PAGE = """<!doctype html>
           ctx.font = "12px system-ui";
           ctx.fillText(`${Math.round(max)} ${unit}`, area.left, area.top + 12);
           ctx.fillText(`${Math.round(min)} ${unit}`, area.left, area.bottom - 4);
+        });
+      }
+
+      function drawRawTachChart(canvas, samples) {
+        const maxPulses = Math.max(2, ...samples.map((sample) =>
+          Math.max(sample.tachPulses || 0, sample.tachRejected || 0)
+        ));
+        const maxRpm = Math.max(1000, ...samples.map((sample) => sample.rpmInstant || sample.rpmWindow || 0)) * 1.15;
+        drawBase(canvas, (ctx, area, range) => {
+          drawPulseBars(ctx, area, range, samples, "tachPulses", "#54d6a5", maxPulses, -3);
+          drawPulseBars(ctx, area, range, samples, "tachRejected", "#e97b68", maxPulses, 3);
+          drawSeries(ctx, area, range, samples, { key: "rpmInstant", color: "#66a8ff", min: 0, max: maxRpm });
+          ctx.fillStyle = "#8da4a2";
+          ctx.font = "12px system-ui";
+          ctx.fillText(`${Math.round(maxPulses)} pulses`, area.left, area.top + 12);
+          ctx.fillText(`${Math.round(maxRpm)} rpm`, area.right - 72, area.top + 12);
+        });
+      }
+
+      function drawPulseBars(ctx, area, range, samples, key, color, max, offset) {
+        const width = Math.max(1, (area.right - area.left) / Math.max(1, samples.length) * 0.55);
+        ctx.fillStyle = color;
+        samples.forEach((sample) => {
+          if (!Number.isFinite(sample[key])) {
+            return;
+          }
+          const x = area.left + ((sample.timestamp - range.start) / Math.max(1, range.end - range.start)) * (area.right - area.left);
+          const h = ((sample[key] / Math.max(1, max)) * (area.bottom - area.top));
+          ctx.globalAlpha = 0.7;
+          ctx.fillRect(x - (width / 2) + offset, area.bottom - h, width, h);
+          ctx.globalAlpha = 1;
         });
       }
 
