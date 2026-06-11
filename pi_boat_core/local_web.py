@@ -9,12 +9,22 @@ from pi_boat_core.config import LocalWebConfig
 
 
 EngineProvider = Callable[[], dict[str, Any]]
+EngineSettingsProvider = Callable[[], dict[str, Any]]
+EngineSettingsUpdater = Callable[[dict[str, Any]], dict[str, Any]]
 
 
 class LocalWebServer:
-    def __init__(self, config: LocalWebConfig, engine_provider: EngineProvider) -> None:
+    def __init__(
+        self,
+        config: LocalWebConfig,
+        engine_provider: EngineProvider,
+        engine_settings_provider: EngineSettingsProvider | None = None,
+        engine_settings_updater: EngineSettingsUpdater | None = None,
+    ) -> None:
         self.config = config
         self.engine_provider = engine_provider
+        self.engine_settings_provider = engine_settings_provider
+        self.engine_settings_updater = engine_settings_updater
         self.run_store = EngineRunStore(Path("./engine_runs.json"))
         self._server: asyncio.Server | None = None
 
@@ -49,6 +59,24 @@ class LocalWebServer:
             if method == "GET" and path == "/api/engine":
                 body = json.dumps(self.engine_provider(), separators=(",", ":")).encode("utf-8")
                 _write_response(writer, 200, "application/json; charset=utf-8", body)
+            elif method == "GET" and path == "/api/engine-settings":
+                settings = self.engine_settings_provider() if self.engine_settings_provider else {"status": "disabled"}
+                body = json.dumps(settings, separators=(",", ":")).encode("utf-8")
+                _write_response(writer, 200, "application/json; charset=utf-8", body)
+            elif method == "POST" and path == "/api/engine-settings":
+                if self.engine_settings_updater is None:
+                    _write_response(writer, 404, "application/json; charset=utf-8", b'{"error":"engine settings are disabled"}')
+                else:
+                    try:
+                        payload = json.loads(body.decode("utf-8"))
+                        if not isinstance(payload, dict):
+                            raise ValueError("engine settings payload must be an object")
+                        settings = self.engine_settings_updater(payload)
+                        response = json.dumps(settings, separators=(",", ":")).encode("utf-8")
+                        _write_response(writer, 200, "application/json; charset=utf-8", response)
+                    except (ValueError, json.JSONDecodeError) as exc:
+                        response = json.dumps({"error": str(exc)}, separators=(",", ":")).encode("utf-8")
+                        _write_response(writer, 400, "application/json; charset=utf-8", response)
             elif method == "GET" and path == "/api/engine-runs":
                 body = json.dumps({"runs": self.run_store.list_runs()}, separators=(",", ":")).encode("utf-8")
                 _write_response(writer, 200, "application/json; charset=utf-8", body)
@@ -244,6 +272,8 @@ ENGINE_PAGE = """<!doctype html>
       .bar-fill { width: 0%; height: 100%; border-radius: inherit; background: var(--color); transition: width 120ms linear; }
       .metric-range { display: flex; justify-content: space-between; color: #708681; font-size: 12px; }
       .run-controls { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; }
+      .setting-control { align-items: center; color: #9fb2ae; display: flex; flex-wrap: wrap; font-size: 14px; gap: 8px; }
+      select { background: #071014; border: 1px solid #2b555c; border-radius: 7px; color: #eef7f5; font: inherit; padding: 8px 30px 8px 10px; }
       button { background: #102a32; border: 1px solid #2b555c; border-radius: 7px; color: #eef7f5; cursor: pointer; font: inherit; font-weight: 700; padding: 8px 11px; }
       button:disabled { cursor: not-allowed; opacity: 0.45; }
       .primary-button { background: #0f5f78; border-color: #1784a5; }
@@ -304,6 +334,18 @@ ENGINE_PAGE = """<!doctype html>
           <button type="button" id="discardRunButton" disabled>Discard</button>
         </div>
         <div id="savedRuns" class="saved-runs"></div>
+      </section>
+      <section class="panel">
+        <header>
+          <h2>RPM Tuning</h2>
+          <span class="run-status" id="rpmTuningStatus">Normal</span>
+        </header>
+        <div class="run-controls">
+          <label class="setting-control">
+            Preset
+            <select id="rpmTuningSelect"></select>
+          </label>
+        </div>
       </section>
       <section class="metrics">
         <div class="metric">
@@ -457,6 +499,8 @@ ENGINE_PAGE = """<!doctype html>
         voltageRawValue: document.querySelector("#voltageRawValue"),
         voltageSensorValue: document.querySelector("#voltageSensorValue"),
         voltageSourceValue: document.querySelector("#voltageSourceValue"),
+        rpmTuningSelect: document.querySelector("#rpmTuningSelect"),
+        rpmTuningStatus: document.querySelector("#rpmTuningStatus"),
       };
       const history = [];
       let activeRun = null;
@@ -468,6 +512,7 @@ ENGINE_PAGE = """<!doctype html>
       els.discardRunButton.addEventListener("click", discardRun);
       els.setTuneBaselineButton.addEventListener("click", setTuneBaseline);
       els.resetTuneButton.addEventListener("click", resetTuneBaseline);
+      els.rpmTuningSelect.addEventListener("change", updateEngineSettings);
 
       async function refresh() {
         try {
@@ -482,8 +527,11 @@ ENGINE_PAGE = """<!doctype html>
             trimHistory();
           }
           els.status.textContent = data.status === "ok" ? `Live - ${data.last_success_age_seconds ?? 0}s old` : data.error || data.status;
-        renderMetrics(sample);
+          renderMetrics(sample);
           renderRawTach(sample);
+          if (data.engine_settings) {
+            renderEngineSettings(data.engine_settings, false);
+          }
           els.mapState.textContent = describeMapState(sample);
           renderAnalysis(data);
           els.detail.textContent = JSON.stringify(data, null, 2);
@@ -503,6 +551,49 @@ ENGINE_PAGE = """<!doctype html>
         } catch (error) {
           els.savedRuns.textContent = error.message;
         }
+      }
+
+      async function refreshEngineSettings() {
+        try {
+          const response = await fetch("/api/engine-settings", { cache: "no-store" });
+          renderEngineSettings(await response.json(), true);
+        } catch (error) {
+          els.rpmTuningStatus.textContent = error.message;
+        }
+      }
+
+      async function updateEngineSettings() {
+        const preset = els.rpmTuningSelect.value;
+        els.rpmTuningStatus.textContent = "Saving...";
+        try {
+          const response = await fetch("/api/engine-settings", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ rpm_tuning_preset: preset }),
+          });
+          if (!response.ok) {
+            throw new Error(`Save failed: ${response.status}`);
+          }
+          renderEngineSettings(await response.json(), true);
+        } catch (error) {
+          els.rpmTuningStatus.textContent = error.message;
+        }
+      }
+
+      function renderEngineSettings(settings, forceOptions) {
+        const presets = Array.isArray(settings.rpm_tuning_presets) ? settings.rpm_tuning_presets : [];
+        if (forceOptions || els.rpmTuningSelect.options.length === 0) {
+          els.rpmTuningSelect.replaceChildren(...presets.map((preset) => {
+            const option = document.createElement("option");
+            option.value = preset.id;
+            option.textContent = preset.label;
+            return option;
+          }));
+        }
+        if (settings.rpm_tuning_preset && document.activeElement !== els.rpmTuningSelect) {
+          els.rpmTuningSelect.value = settings.rpm_tuning_preset;
+        }
+        els.rpmTuningStatus.textContent = settings.rpm_tuning_label || settings.rpm_tuning_preset || "Normal";
       }
 
       function startRun() {
@@ -995,6 +1086,7 @@ ENGINE_PAGE = """<!doctype html>
 
       refresh();
       refreshRuns();
+      refreshEngineSettings();
       setInterval(refresh, 50);
     </script>
   </body>

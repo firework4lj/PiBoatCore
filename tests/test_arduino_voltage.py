@@ -154,6 +154,49 @@ class ArduinoVoltageParserTests(unittest.TestCase):
         self.assertGreater(payload["rpm_instant"], 0)
         self.assertEqual(payload["rpm"], 0.0)
 
+    def test_rpm_tuning_high_boost_preserves_low_rpm_and_boosts_high_rpm(self) -> None:
+        sensor = ArduinoVoltageSensor(
+            ArduinoVoltageConfig(
+                enabled=True,
+                port="/dev/null",
+                baudrate=115200,
+                timeout_seconds=1,
+                max_attempts=1,
+                retry_delay_seconds=0.1,
+            )
+        )
+
+        sensor.update_engine_settings({"rpm_tuning_preset": "high_plus_30"})
+
+        self.assertAlmostEqual(sensor._estimate_rpm(1, 100), 300.0)
+        self.assertAlmostEqual(sensor._estimate_rpm(8, 50), 6240.0)
+
+    def test_rolling_rpm_uses_selected_tuning_preset(self) -> None:
+        sensor = ArduinoVoltageSensor(
+            ArduinoVoltageConfig(
+                enabled=True,
+                port="/dev/null",
+                baudrate=115200,
+                timeout_seconds=1,
+                max_attempts=1,
+                retry_delay_seconds=0.1,
+            )
+        )
+        sensor.update_engine_settings({"rpm_tuning_preset": "double"})
+
+        payload = {}
+        for index in range(20):
+            payload = parse_voltage_line(
+                '{"type":"engine_raw","voltage_pin":"A0","voltage_raw":518,'
+                '"map_pin":"A1","map_raw":412,"tach_pin":"D2","tach_pulses":1,"interval_ms":50}'
+            )
+            sensor._apply_rpm_tuning(payload)
+            sensor._apply_rolling_rpm(payload, 100.0 + (index * 0.05))
+
+        self.assertEqual(payload["rpm_instant"], 1200.0)
+        self.assertEqual(payload["rpm_window"], 1200.0)
+        self.assertEqual(payload["rpm_tuning_preset"], "double")
+
     def test_map_smoothing_publishes_average_and_offset_load(self) -> None:
         sensor = ArduinoVoltageSensor(
             ArduinoVoltageConfig(

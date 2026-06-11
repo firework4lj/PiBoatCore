@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import argparse
+import json
 import subprocess
 import logging
 import signal
 import time
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from pi_boat_core.camera import capture_snapshot
@@ -31,6 +33,7 @@ UNDERWAY_SPEED_KNOTS = 1.0
 NETWORK_RECOVERY_FAILURE_THRESHOLD = 5
 NETWORK_RECOVERY_COOLDOWN_SECONDS = 300
 CELLULAR_CONNECTION_NAME = "sim7600-usb0"
+ENGINE_SETTINGS_PATH = Path("./engine_settings.json")
 
 
 class BoatTelemetryService:
@@ -55,6 +58,7 @@ class BoatTelemetryService:
         self._last_snapshot_request_id: str | None = None
         self._consecutive_upload_failures = 0
         self._last_network_recovery_monotonic = 0.0
+        self.load_engine_settings()
 
     def stop(self) -> None:
         self._stop.set()
@@ -80,7 +84,12 @@ class BoatTelemetryService:
                 task.cancel()
 
     async def run_local_web(self) -> None:
-        server = LocalWebServer(self.config.local_web, self.latest_engine_payload)
+        server = LocalWebServer(
+            self.config.local_web,
+            self.latest_engine_payload,
+            self.engine_settings,
+            self.update_engine_settings,
+        )
         await server.run_until_stopped(self._stop)
 
     async def run_heartbeats(self) -> None:
@@ -183,6 +192,50 @@ class BoatTelemetryService:
             if callable(latest_engine_payload):
                 return latest_engine_payload()
         return {"status": "disabled", "error": "arduino voltage sensor is not enabled"}
+
+    def engine_settings(self) -> dict[str, Any]:
+        for sensor in self.sensors:
+            engine_settings = getattr(sensor, "engine_settings", None)
+            if callable(engine_settings):
+                return engine_settings()
+        return {"status": "disabled", "error": "arduino voltage sensor is not enabled"}
+
+    def update_engine_settings(self, settings: dict[str, Any]) -> dict[str, Any]:
+        updated: dict[str, Any] | None = None
+        for sensor in self.sensors:
+            update_engine_settings = getattr(sensor, "update_engine_settings", None)
+            if callable(update_engine_settings):
+                updated = update_engine_settings(settings)
+                break
+
+        if updated is None:
+            updated = self.engine_settings()
+        else:
+            self.save_engine_settings(updated)
+        return updated
+
+    def load_engine_settings(self) -> None:
+        try:
+            settings = json.loads(ENGINE_SETTINGS_PATH.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return
+        except json.JSONDecodeError:
+            LOGGER.warning("engine settings file is invalid; ignoring %s", ENGINE_SETTINGS_PATH)
+            return
+
+        if isinstance(settings, dict):
+            self.update_engine_settings(settings)
+
+    def save_engine_settings(self, settings: dict[str, Any]) -> None:
+        stored = {
+            key: settings[key]
+            for key in ("rpm_tuning_preset",)
+            if key in settings
+        }
+        try:
+            ENGINE_SETTINGS_PATH.write_text(json.dumps(stored, indent=2) + "\n", encoding="utf-8")
+        except OSError as exc:
+            LOGGER.warning("failed to save engine settings: %s", exc)
 
     async def flush_spool(self) -> None:
         for item in self.spool.pending():

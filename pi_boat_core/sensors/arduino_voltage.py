@@ -37,6 +37,41 @@ TACH_NOISE_MAX_ACCEPTED_PULSES = 12
 ENGINE_ANALYSIS_WINDOW_SECONDS = 10.0
 ENGINE_RUNNING_RPM = 350.0
 ENGINE_IDLE_RPM = 1100.0
+RPM_TUNING_PRESETS: dict[str, dict[str, Any]] = {
+    "normal": {
+        "label": "Normal",
+        "multiplier": 1.0,
+        "high_rpm_boost": 0.0,
+    },
+    "low_noise": {
+        "label": "Low/noisy pickup",
+        "multiplier": 0.5,
+        "high_rpm_boost": 0.0,
+    },
+    "high_plus_15": {
+        "label": "High RPM +15%",
+        "multiplier": 1.0,
+        "high_rpm_boost": 0.15,
+    },
+    "high_plus_30": {
+        "label": "High RPM +30%",
+        "multiplier": 1.0,
+        "high_rpm_boost": 0.30,
+    },
+    "high_plus_50": {
+        "label": "High RPM +50%",
+        "multiplier": 1.0,
+        "high_rpm_boost": 0.50,
+    },
+    "double": {
+        "label": "Double all RPM",
+        "multiplier": 2.0,
+        "high_rpm_boost": 0.0,
+    },
+}
+DEFAULT_RPM_TUNING_PRESET = "normal"
+RPM_HIGH_BOOST_START = 1200.0
+RPM_HIGH_BOOST_FULL = 3200.0
 
 
 class ArduinoVoltageError(RuntimeError):
@@ -60,6 +95,8 @@ class ArduinoVoltageSensor(SensorAdapter):
         self._last_rpm_sampled_at: float | None = None
         self._smoothed_map_kpa: float | None = None
         self._analysis_samples: deque[dict[str, float]] = deque()
+        self._rpm_tuning_preset = DEFAULT_RPM_TUNING_PRESET
+        self._settings_lock = threading.Lock()
 
     async def read(self) -> dict[str, Any]:
         if self._streaming:
@@ -127,6 +164,7 @@ class ArduinoVoltageSensor(SensorAdapter):
 
                 try:
                     reading = parse_voltage_line(line)
+                    self._apply_rpm_tuning(reading)
                     return {
                         "status": "ok",
                         "port": self.config.port,
@@ -190,6 +228,7 @@ class ArduinoVoltageSensor(SensorAdapter):
                     continue
 
                 sampled_at = time.monotonic()
+                self._apply_rpm_tuning(payload)
                 self._apply_rolling_rpm(payload, sampled_at)
                 self._apply_map_smoothing(payload)
                 self._apply_engine_analysis(payload, sampled_at)
@@ -226,7 +265,7 @@ class ArduinoVoltageSensor(SensorAdapter):
 
         total_pulses = sum(sample[1] for sample in self._tach_samples)
         total_interval_ms = sum(sample[2] for sample in self._tach_samples)
-        window_rpm = estimate_rpm(total_pulses, total_interval_ms)
+        window_rpm = self._estimate_rpm(total_pulses, total_interval_ms)
         window_ready = total_interval_ms >= RPM_MIN_WINDOW_SECONDS * 1000.0
         rpm_rejected = window_ready and window_rpm > RPM_MAX_VALID
 
@@ -333,7 +372,57 @@ class ArduinoVoltageSensor(SensorAdapter):
             "consecutive_failures": self._consecutive_failures,
             "last_success_age_seconds": last_success_age,
             **self._last_success_payload,
+            "engine_settings": self.engine_settings(),
         }
+
+    def engine_settings(self) -> dict[str, Any]:
+        with self._settings_lock:
+            preset_id = self._rpm_tuning_preset
+            preset = RPM_TUNING_PRESETS[preset_id]
+            return {
+                "rpm_tuning_preset": preset_id,
+                "rpm_tuning_label": preset["label"],
+                "rpm_tuning_presets": [
+                    {"id": key, "label": value["label"]}
+                    for key, value in RPM_TUNING_PRESETS.items()
+                ],
+            }
+
+    def update_engine_settings(self, settings: dict[str, Any]) -> dict[str, Any]:
+        rpm_tuning_preset = settings.get("rpm_tuning_preset")
+        if not isinstance(rpm_tuning_preset, str) or rpm_tuning_preset not in RPM_TUNING_PRESETS:
+            return self.engine_settings()
+
+        with self._settings_lock:
+            self._rpm_tuning_preset = rpm_tuning_preset
+            self._tach_samples.clear()
+            self._rpm_windows.clear()
+            self._smoothed_rpm = None
+        return self.engine_settings()
+
+    def _apply_rpm_tuning(self, payload: dict[str, Any]) -> None:
+        tach_pulses = payload.get("tach_pulses")
+        interval_ms = payload.get("tach_interval_ms")
+        if not isinstance(tach_pulses, int | float) or not isinstance(interval_ms, int | float):
+            return
+        payload["rpm"] = self._estimate_rpm(tach_pulses, interval_ms)
+        with self._settings_lock:
+            payload["rpm_tuning_preset"] = self._rpm_tuning_preset
+
+    def _estimate_rpm(self, pulse_count: float, interval_ms: float) -> float:
+        with self._settings_lock:
+            preset = RPM_TUNING_PRESETS[self._rpm_tuning_preset]
+        base_rpm = estimate_rpm(pulse_count, interval_ms)
+        multiplier = float(preset["multiplier"])
+        high_boost = float(preset["high_rpm_boost"])
+        if high_boost <= 0:
+            return base_rpm * multiplier
+
+        boost_ratio = min(
+            1.0,
+            max(0.0, (base_rpm - RPM_HIGH_BOOST_START) / (RPM_HIGH_BOOST_FULL - RPM_HIGH_BOOST_START)),
+        )
+        return base_rpm * multiplier * (1.0 + (high_boost * boost_ratio))
 
 
 def parse_voltage_line(line: str) -> dict[str, Any]:
